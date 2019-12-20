@@ -56,15 +56,22 @@ func Print(tree *BPlusTree) {
 }
 
 func printNode(node bPlusNode, level int) {
-	fmt.Printf("%s+ %s\n", strings.Repeat("--", level), nodeString(node))
+	fmt.Printf("%s+ %s", strings.Repeat("--", level), nodeString(node))
 
-	n, ok := node.(*internalNode)
+	leaf, ok := node.(*leafNode)
+	if ok {
+		fmt.Printf("     [-->%s]\n", leaf.next)
+		return
+	}
+	fmt.Println()
+
+	internal, ok := node.(*internalNode)
 	if !ok {
 		return
 	}
 
-	for i := 0; i < len(n.children); i++ {
-		printNode(n.children[i], level+1)
+	for i := 0; i < len(internal.children); i++ {
+		printNode(internal.children[i], level+1)
 	}
 }
 
@@ -88,5 +95,6 @@ type bPlusNode interface {
 	IsOverflow() bool
 	Split() bPlusNode
 	Key(idx int) []byte
+	LeafKey() []byte
 	Size() int
 }

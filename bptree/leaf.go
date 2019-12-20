@@ -2,7 +2,6 @@ package bptree
 
 import (
 	"bytes"
-	"log"
 )
 
 type leafNode struct {
@@ -27,11 +26,9 @@ func (node *leafNode) Put(key, val []byte) bool {
 		node.vals[idx] = val
 		return false
 	}
-	log.Printf("insert '%s' at %d in node %s", string(key), idx, nodeString(node))
 	node.insertEntry(idx, key, val)
 
 	if node.tree.root.IsOverflow() {
-		log.Printf("")
 		sibling := node.Split().(*leafNode)
 
 		newRoot := &internalNode{
@@ -77,6 +74,10 @@ func (node *leafNode) Key(idx int) []byte {
 	return node.keys[idx]
 }
 
+func (node *leafNode) LeafKey() []byte {
+	return node.Key(0)
+}
+
 func (node *leafNode) insertEntry(idx int, k, v []byte) {
 	node.keys = append(node.keys, nil)
 	node.vals = append(node.vals, nil)
@@ -86,6 +87,10 @@ func (node *leafNode) insertEntry(idx int, k, v []byte) {
 
 	node.keys[idx] = k
 	node.vals[idx] = v
+}
+
+func (node *leafNode) String() string {
+	return nodeString(node)
 }
 
 func binarySearch(arr [][]byte, key []byte) (idx int, found bool) {
