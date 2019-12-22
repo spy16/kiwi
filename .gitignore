@@ -16,6 +16,7 @@ vendor/
 .vscode/
 .idea/
 bin/
+expt/
 
 *.db
 *.kiwi
