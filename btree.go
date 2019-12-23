@@ -9,7 +9,7 @@ import (
 // New returns an instance of empty B+ Tree of given order.
 func New(order int) *BPlusTree {
 	if order <= 2 {
-		panic("")
+		panic("order should be greater than 2")
 	}
 
 	mgr := &inMemoryNodeManager{}
@@ -18,13 +18,12 @@ func New(order int) *BPlusTree {
 	return &BPlusTree{
 		nodeManager: mgr,
 		order:       order,
-		maxEntries:  order - 1,
 		rootid:      1,
 		size:        0,
 	}
 }
 
-// KVBytes is a convienience function to convert a string key value
+// KVBytes is a convenience function to convert a string key value
 // pair to a byte-slice key-value pair.
 func KVBytes(k, v string) (key, val []byte) {
 	return []byte(k), []byte(v)
@@ -54,9 +53,19 @@ func (tree *BPlusTree) Get(key []byte) ([]byte, error) {
 // Put inserts the key-value pair into the tree. If an entry with given key
 // already exists, updates the value.
 func (tree *BPlusTree) Put(key, val []byte) error {
-	isInsert := tree.nodePut(tree.root(), key, val)
+	isInsert := tree.putEntry(tree.root(), key, val)
 	if isInsert {
 		tree.size++
+	}
+
+	return nil
+}
+
+// Delete removes an entry with the given key from the tree.
+func (tree *BPlusTree) Delete(key []byte) error {
+	isDelete := tree.delEntry(tree.root(), key)
+	if !isDelete {
+		return errors.New("key not found")
 	}
 
 	return nil
@@ -79,7 +88,7 @@ func (tree *BPlusTree) root() *node {
 // children. If the node is leaf, it will be inserted into it. If the node
 // is internal, searc index will be used to choose the child where the entry
 // should be added.
-func (tree *BPlusTree) nodePut(node *node, key, val []byte) bool {
+func (tree *BPlusTree) putEntry(node *node, key, val []byte) bool {
 	idx, found := node.search(key)
 
 	if node.isLeaf() {
@@ -94,7 +103,7 @@ func (tree *BPlusTree) nodePut(node *node, key, val []byte) bool {
 	}
 
 	target := tree.node(node.children[idx])
-	if isInsert := tree.nodePut(target, key, val); !isInsert {
+	if isInsert := tree.putEntry(target, key, val); !isInsert {
 		return false
 	}
 
@@ -105,6 +114,79 @@ func (tree *BPlusTree) nodePut(node *node, key, val []byte) bool {
 
 	tree.splitRootIfNeeded(node)
 	return true
+}
+
+func (tree *BPlusTree) delEntry(n *node, key []byte) bool {
+	idx, found := n.search(key)
+
+	if n.isLeaf() {
+		if !found {
+			return false
+		}
+
+		n.deleteEntry(idx)
+		return true
+	}
+
+	child := tree.node(n.children[idx])
+	if isDelete := tree.delEntry(child, key); !isDelete {
+		return false
+	}
+
+	if tree.isUnderflow(child) {
+		leftID, rightID := n.keySiblings(key)
+
+		var left, right *node
+		if leftID > 0 {
+			left = tree.node(leftID)
+			right = child
+		} else {
+			left = child
+			right = tree.node(rightID)
+		}
+
+		tree.merge(left, right)
+		child.next = right.next
+
+		idx, found := right.search(tree.leafKey(right))
+		if found {
+			n.deleteEntry(idx)
+			// TODO: Free node being removed.
+			n.deleteChild(idx + 1)
+		}
+
+		if tree.isOverflow(left) {
+			sibling := tree.split(left)
+			n.addChild(tree.leafKey(sibling), sibling)
+		}
+
+		if len(tree.root().keys) == 0 {
+			tree.rootid = left.id
+		}
+	}
+
+	return true
+}
+
+func (tree *BPlusTree) merge(n *node, rightSibling *node) {
+	if n.isLeaf() {
+		if !rightSibling.isLeaf() {
+			panic("can merge leaf with only leaf node")
+		}
+
+		n.keys = append(n.keys, rightSibling.keys...)
+		n.vals = append(n.vals, rightSibling.vals...)
+		n.next = rightSibling.id
+		return
+	}
+
+	if rightSibling.isLeaf() {
+		panic("can merge internal with only internal node")
+	}
+
+	n.keys = append(n.keys, tree.leafKey(n))
+	n.keys = append(n.keys, rightSibling.keys...)
+	n.children = append(n.children, rightSibling.children...)
 }
 
 func (tree *BPlusTree) splitRootIfNeeded(insertedIn *node) {
@@ -161,10 +243,18 @@ func (tree *BPlusTree) split(n *node) *node {
 
 func (tree *BPlusTree) isOverflow(n *node) bool {
 	if n.isLeaf() {
-		return len(n.vals) > tree.maxEntries
+		return len(n.vals) > (tree.order - 1)
 	}
 
 	return len(n.children) > tree.order
+}
+
+func (tree *BPlusTree) isUnderflow(n *node) bool {
+	if n.isLeaf() {
+		return len(n.vals) < (tree.order / 2)
+	}
+
+	return len(n.children) < ((tree.order + 1) / 2)
 }
 
 func (tree *BPlusTree) searchNodeRecursive(n *node, key []byte) (target *node, idx int, found bool) {

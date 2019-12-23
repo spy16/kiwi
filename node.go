@@ -85,6 +85,20 @@ func (n *node) search(key []byte) (idx int, found bool) {
 	return idx, found
 }
 
+func (n *node) keySiblings(key []byte) (left, right nodeid) {
+	idx, _ := n.search(key)
+
+	if idx > 0 {
+		left = n.children[idx-1]
+	}
+
+	if idx < len(n.keys) {
+		right = n.children[idx+1]
+	}
+
+	return left, right
+}
+
 func (n *node) addChild(key []byte, child *node) {
 	idx, found := n.search(key)
 	if found {
@@ -103,10 +117,24 @@ func (n *node) insertEntry(idx int, key, val []byte) {
 	}
 }
 
+func (n *node) deleteEntry(idx int) {
+	n.keys[idx] = nil
+	n.keys = append(n.keys[:idx], n.keys[idx+1:]...)
+
+	if n.isLeaf() {
+		n.vals[idx] = nil
+		n.vals = append(n.vals[:idx], n.vals[idx+1:]...)
+	}
+}
+
 func (n *node) insertChild(idx int, child *node) {
 	n.children = append(n.children, 0)
 	copy(n.children[idx+1:], n.children[idx:])
 	n.children[idx] = child.id
+}
+
+func (n *node) deleteChild(idx int) {
+	n.children = append(n.children[:idx], n.children[idx+1:]...)
 }
 
 func (n *node) insertKey(idx int, key []byte) {
