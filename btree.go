@@ -36,7 +36,7 @@ type BPlusTree struct {
 	order      int
 	maxEntries int
 	size       int
-	rootid     nodeid
+	rootid     nodeID
 }
 
 // Get searches for the given key and returns the value associated with it.
@@ -67,6 +67,7 @@ func (tree *BPlusTree) Delete(key []byte) error {
 	if !isDelete {
 		return errors.New("key not found")
 	}
+	tree.size--
 
 	return nil
 }
@@ -198,7 +199,7 @@ func (tree *BPlusTree) splitRootIfNeeded(insertedIn *node) {
 
 	newRoot := tree.alloc()
 	newRoot.keys = [][]byte{tree.leafKey(sibling)}
-	newRoot.children = []nodeid{insertedIn.id, sibling.id}
+	newRoot.children = []nodeID{insertedIn.id, sibling.id}
 
 	tree.rootid = newRoot.id
 }
@@ -232,7 +233,7 @@ func (tree *BPlusTree) split(n *node) *node {
 		at := (size / 2) + 1
 
 		sibling.keys = append([][]byte(nil), n.keys[at:]...)
-		sibling.children = append([]nodeid(nil), n.children[at:len(n.keys)+1]...)
+		sibling.children = append([]nodeID(nil), n.children[at:len(n.keys)+1]...)
 
 		n.keys = n.keys[:at-1]
 		n.children = n.children[:at]
@@ -272,7 +273,7 @@ func (tree *BPlusTree) searchNodeRecursive(n *node, key []byte) (target *node, i
 
 type nodeManager interface {
 	alloc() *node
-	node(id nodeid) *node
+	node(id nodeID) *node
 }
 
 // Print formats and prints the tree.

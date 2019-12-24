@@ -12,7 +12,7 @@ var errNotFound = errors.New("key not found")
 
 type inMemoryNodeManager struct {
 	nodes    []*node
-	freelist []nodeid
+	freelist []nodeID
 }
 
 func (im *inMemoryNodeManager) alloc() *node {
@@ -28,7 +28,7 @@ func (im *inMemoryNodeManager) alloc() *node {
 	return n
 }
 
-func (im *inMemoryNodeManager) free(id nodeid) {
+func (im *inMemoryNodeManager) free(id nodeID) {
 	if int(id) > len(im.nodes) {
 		return
 	}
@@ -36,42 +36,22 @@ func (im *inMemoryNodeManager) free(id nodeid) {
 	im.freelist = append(im.freelist, id)
 }
 
-func (im *inMemoryNodeManager) node(id nodeid) *node {
+func (im *inMemoryNodeManager) node(id nodeID) *node {
 	return im.nodes[int(id)-1]
 }
 
-func (im *inMemoryNodeManager) nextID() nodeid {
-	return nodeid(len(im.nodes) + 1)
+func (im *inMemoryNodeManager) nextID() nodeID {
+	return nodeID(len(im.nodes) + 1)
 }
 
-type nodeid uint64
+type nodeID uint64
 
 type node struct {
-	id       nodeid
-	next     nodeid
+	id       nodeID
+	next     nodeID
 	keys     [][]byte
 	vals     [][]byte
-	children []nodeid
-}
-
-func (n *node) String() string {
-	var keys []string
-	for _, key := range n.keys {
-		keys = append(keys, string(key))
-	}
-
-	nodeType := "Internal"
-	if n.isLeaf() {
-		nodeType = "Leaf"
-	}
-
-	nextNode := "x"
-	if n.isLeaf() && n.next != 0 {
-		nextNode = fmt.Sprintf("%d", n.next)
-	}
-
-	return fmt.Sprintf("%s{id=%d keys=%s next=%s}",
-		nodeType, n.id, "["+strings.Join(keys, ",")+"]", nextNode)
+	children []nodeID
 }
 
 func (n *node) search(key []byte) (idx int, found bool) {
@@ -85,7 +65,7 @@ func (n *node) search(key []byte) (idx int, found bool) {
 	return idx, found
 }
 
-func (n *node) keySiblings(key []byte) (left, right nodeid) {
+func (n *node) keySiblings(key []byte) (left, right nodeID) {
 	idx, _ := n.search(key)
 
 	if idx > 0 {
@@ -151,4 +131,27 @@ func (n *node) insertVal(idx int, val []byte) {
 
 func (n *node) isLeaf() bool {
 	return len(n.children) == 0
+}
+
+func (n *node) String() string {
+	kind := "Internal"
+	if n.isLeaf() {
+		kind = "Leaf"
+	}
+
+	nextNode := "x"
+	if n.isLeaf() && n.next != 0 {
+		nextNode = fmt.Sprintf("%d", n.next)
+	}
+
+	return fmt.Sprintf("%s{id=%d keys=%s next=%s}", kind, n.id, keysStr(n.keys), nextNode)
+}
+
+func keysStr(keys [][]byte) string {
+	var parts []string
+	for _, key := range keys {
+		parts = append(parts, string(key))
+	}
+
+	return "[" + strings.Join(parts, ",") + "]"
 }
