@@ -1,5 +1,10 @@
 all: clean fmt test build
 
+
+install:
+	@echo "Installing kiwi..."
+	@go install ./cmd/kiwi/
+
 clean:
 	@echo "Cleaning up previous builds..."
 	@rm -rf ./bin

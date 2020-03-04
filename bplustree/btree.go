@@ -1,4 +1,4 @@
-package kiwi
+package btree
 
 import (
 	"errors"
@@ -22,12 +22,6 @@ func New(order int) *BPlusTree {
 		rootid:      1,
 		size:        0,
 	}
-}
-
-// KVBytes is a convienience function to convert a string key value
-// pair to a byte-slice key-value pair.
-func KVBytes(k, v string) (key, val []byte) {
-	return []byte(k), []byte(v)
 }
 
 // BPlusTree implements an order-m B+ Tree.

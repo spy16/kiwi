@@ -1,20 +1,31 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
-	"fmt"
+	"os"
 
-	"github.com/spy16/kiwi"
+	"github.com/spy16/kiwi/linearhash"
 )
 
-var file = flag.String("file", "temp.kiwi", "Kiwi database file path")
+var file = flag.String("file", "kiwi.db", "DB file path")
 
 func main() {
-	db, err := kiwi.Open(*file, nil)
+	flag.Parse()
+
+	inmem := &linearhash.InMemoryBlobStore{}
+
+	lhs, err := linearhash.Open(*file, inmem, nil)
 	if err != nil {
 		panic(err)
 	}
-	defer db.Close()
+	defer lhs.Close()
 
-	fmt.Println(db)
+	printStats(lhs)
+}
+
+func printStats(lhs *linearhash.Store) {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	enc.Encode(lhs.Stats())
 }

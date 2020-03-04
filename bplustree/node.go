@@ -1,4 +1,4 @@
-package kiwi
+package btree
 
 import (
 	"bytes"

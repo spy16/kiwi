@@ -1,2 +1,5 @@
 # kiwi
-Kiwi a key-value database written in Go.
+
+> WIP
+
+Kiwi is a multi-backend key-value database written in Go.

@@ -1,50 +1,40 @@
 package kiwi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"time"
 )
-
-// DefaultOptions provides some sane defaults to DB options and is
-// used when nil value is passed to Open.
-var DefaultOptions = &Options{
-	Mode:     os.ModePerm,
-	ReadOnly: false,
-}
 
 var (
 	// ErrClosed is returned when an operation is performed on a closed
 	// Kiwi DB instance.
 	ErrClosed = errors.New("invalid operation on closed db")
+
+	// ErrNotFound is returned when value for a key is not found in the
+	// database.
+	ErrNotFound = errors.New("key not found")
+
+	// ErrReadOnly is returned if a put is invoked on a readonly instance.
+	ErrReadOnly = errors.New("put/delete not allowed on read-only")
 )
 
-// Open opens the file as Kiwi Database file. If the file does not exists,
-// it will be created. If the file is empty, it will be initialized with
-// Kiwi database format.
-func Open(path string, opts *Options) (*DB, error) {
-	if opts == nil {
-		opts = DefaultOptions
-	}
-
-	flag := os.O_RDWR
-	if opts.ReadOnly {
-		flag = os.O_RDONLY
-	}
-
-	fh, err := os.OpenFile(path, flag|os.O_CREATE, opts.Mode)
-	if err != nil {
-		return nil, err
-	}
+// Open opens the file as Kiwi Database file.
+func Open(storage Storage, opts *Options) (*DB, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 
 	db := &DB{
 		isOpen:     true,
 		isReadOnly: opts.ReadOnly,
-		fh:         fh,
-		path:       path,
+		storage:    storage,
+		cancelSync: cancel,
 	}
 
-	// TODO: Should get an exclusive file lock if not readonly.
+	if !db.isReadOnly {
+		go db.startSync(ctx, opts.Interval)
+	}
 
 	return db, nil
 }
@@ -54,8 +44,70 @@ func Open(path string, opts *Options) (*DB, error) {
 type DB struct {
 	isOpen     bool
 	isReadOnly bool
-	path       string
-	fh         *os.File
+	storage    Storage
+	cancelSync func()
+
+	syncErr error
+}
+
+// Storage implementations provide storage backend for kiwi database.
+type Storage interface {
+	Get(key []byte) (val []byte, err error)
+	Put(key, val []byte) error
+	Del(key []byte) error
+}
+
+// Syncer can be implemented by storage backends if regular file system
+// syncs are needed.
+type Syncer interface {
+	Sync(ctx context.Context) error
+}
+
+// Get returns the value associated with the given key. Returns ErrNotFound
+// if the key is not found.
+func (db *DB) Get(key []byte) ([]byte, error) {
+	return db.storage.Get(key)
+}
+
+// Put puts the key-value pair into the database.
+func (db *DB) Put(key, val []byte) error {
+	if db.isReadOnly {
+		return ErrReadOnly
+	}
+	return db.storage.Put(key, val)
+}
+
+// Del removes the entry with the given key from the database.
+func (db *DB) Del(key []byte) error {
+	if db.isReadOnly {
+		return ErrReadOnly
+	}
+	return db.storage.Del(key)
+}
+
+func (db *DB) startSync(ctx context.Context, interval time.Duration) {
+	syncer, ok := db.storage.(Syncer)
+	if !ok {
+		return
+	}
+
+	for {
+		tick := time.NewTicker(interval)
+		defer tick.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case <-tick.C:
+				if err := syncer.Sync(ctx); err != nil {
+					db.syncErr = err
+					return
+				}
+			}
+		}
+	}
 }
 
 // Close flushes all pending writes and releases locks and closes the file.
@@ -65,23 +117,16 @@ func (db *DB) Close() error {
 	}
 	db.isOpen = false
 
-	if db.fh != nil {
-		if err := db.fh.Close(); err != nil {
-			return err
-		}
-		db.fh = nil
-	}
-
-	db.path = ""
 	return nil
 }
 
 func (db *DB) String() string {
-	return fmt.Sprintf("DB{File=%s, ReadOnly: %t}", db.fh.Name(), db.isReadOnly)
+	return fmt.Sprintf("DB{ReadOnly: %t}", db.isReadOnly)
 }
 
 // Options can be use to control how the database is opened and managed.
 type Options struct {
 	Mode     os.FileMode
 	ReadOnly bool
+	Interval time.Duration
 }
