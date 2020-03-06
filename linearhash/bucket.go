@@ -11,7 +11,6 @@ const (
 
 	// bucket flags
 	bucketHasOverflow = 0x1
-	bucketIsOverflow  = 0x2
 
 	bucketSz = uint32(unsafe.Sizeof(bucket{}))
 	slotSz   = uint32(unsafe.Sizeof(slot{}))

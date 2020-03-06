@@ -10,8 +10,6 @@ const (
 	// file.
 	kiwiMagic   uint32 = 0x6B697769
 	kiwiVersion uint32 = 0x01
-
-	headerSz = 24 // 6 uint32 fields = 6 x (32/8) bytes
 )
 
 type header struct {
@@ -32,11 +30,12 @@ func (h *header) validate() error {
 		return fmt.Errorf("invalid/incompatible version: %d", h.version)
 	}
 
-	if h.pageSz <= 0 {
+	if h.pageSz == 0 {
 		return errors.New("invalid page size in header")
 	}
 
 	if h.bucketCount == 0 {
+		// we initialize the db with at-least 1 bucket.
 		return errors.New("invalid bucket count")
 	}
 
