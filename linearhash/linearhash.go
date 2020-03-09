@@ -67,15 +67,7 @@ type Options struct {
 // BlobStore implementation is responsible for storing binary blobs and
 // managing offsets & free-lists.
 type BlobStore interface {
-	// Fetch should return the binary blob starting at given offset.
-	// Size of the blob should be handled by the blob store.
 	Fetch(offset uint64) ([]byte, error)
-
-	// Alloc should allocate space & store the given binary data and
-	// return the allocated offset.
 	Alloc(data []byte) (offset uint64, err error)
-
-	// Free should de-allocate the binary blob starting at given offset.
-	// Size of the blob should be handled by the blob store.
 	Free(offset uint64) error
 }

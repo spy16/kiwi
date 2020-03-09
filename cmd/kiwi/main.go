@@ -5,7 +5,7 @@ import (
 	"flag"
 	"os"
 
-	"github.com/spy16/kiwi"
+	"github.com/spy16/kiwi/blob"
 	"github.com/spy16/kiwi/linearhash"
 )
 
@@ -14,7 +14,7 @@ var file = flag.String("file", "kiwi.db", "DB file path")
 func main() {
 	flag.Parse()
 
-	inmem := &kiwi.InMemBlobStore{}
+	inmem := &blob.InMemStore{}
 
 	lhs, err := linearhash.Open(*file, inmem, nil)
 	if err != nil {

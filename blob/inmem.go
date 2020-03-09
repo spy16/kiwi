@@ -1,13 +1,13 @@
-package kiwi
+package blob
 
 import (
 	"fmt"
 	"sync"
 )
 
-// InMemBlobStore implements a binary store using in-memory arrays. Zero value
-// is ready to use. InMemBlobStore is safe for concurrent use.
-type InMemBlobStore struct {
+// InMemStore implements a concurrent safe binary store using in-memory arrays.
+// Zero value is ready to use.
+type InMemStore struct {
 	initOnce sync.Once
 	mu       *sync.RWMutex
 	blobs    [][]byte
@@ -16,7 +16,7 @@ type InMemBlobStore struct {
 
 // Alloc creates a blob, appends it to the blobs list and returns the
 // array index of the blob.
-func (inmem *InMemBlobStore) Alloc(data []byte) (uint64, error) {
+func (inmem *InMemStore) Alloc(data []byte) (uint64, error) {
 	inmem.initOnce.Do(func() {
 		inmem.mu = &sync.RWMutex{}
 	})
@@ -36,7 +36,7 @@ func (inmem *InMemBlobStore) Alloc(data []byte) (uint64, error) {
 
 // Fetch returns the blob stored at given index/offset. Returns error
 // if the index is not found.
-func (inmem *InMemBlobStore) Fetch(offset uint64) ([]byte, error) {
+func (inmem *InMemStore) Fetch(offset uint64) ([]byte, error) {
 	if int(offset) >= len(inmem.blobs) {
 		return nil, fmt.Errorf("invalid offset, valid range [0, %d)", len(inmem.blobs))
 	}
@@ -48,7 +48,7 @@ func (inmem *InMemBlobStore) Fetch(offset uint64) ([]byte, error) {
 
 // Free removes the entry at given index/offset. Returns error if the
 // offset is invalid.
-func (inmem *InMemBlobStore) Free(offset uint64) error {
+func (inmem *InMemStore) Free(offset uint64) error {
 	if int(offset) >= len(inmem.blobs) {
 		return fmt.Errorf("invalid offset, valid range [0, %d)", len(inmem.blobs))
 	}
@@ -65,7 +65,7 @@ func (inmem *InMemBlobStore) Free(offset uint64) error {
 	return nil
 }
 
-func (inmem *InMemBlobStore) isFree(offset uint64) bool {
+func (inmem *InMemStore) isFree(offset uint64) bool {
 	for _, freeOffset := range inmem.freeList {
 		if offset == freeOffset {
 			return true

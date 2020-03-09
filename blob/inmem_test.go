@@ -1,15 +1,15 @@
-package kiwi_test
+package blob_test
 
 import (
 	"reflect"
 	"testing"
 
-	"github.com/spy16/kiwi"
+	"github.com/spy16/kiwi/blob"
 )
 
 func TestInMemBlobStore_Alloc(t *testing.T) {
 	data := []byte{0, 1, 3, 5}
-	inmem := &kiwi.InMemBlobStore{}
+	inmem := &blob.InMemStore{}
 
 	offset, err := inmem.Alloc(data)
 	if err != nil {
@@ -32,7 +32,7 @@ func TestInMemBlobStore_Alloc(t *testing.T) {
 
 func TestInMemBlobStore_Fetch(t *testing.T) {
 	data := []byte{0, 1, 3, 5}
-	inmem := &kiwi.InMemBlobStore{}
+	inmem := &blob.InMemStore{}
 	offset, err := inmem.Alloc(data)
 	if err != nil {
 		t.Fatalf("Alloc() unexpected error: %+v", err)
@@ -59,7 +59,7 @@ func TestInMemBlobStore_Fetch(t *testing.T) {
 
 func TestInMemBlobStore_Free(t *testing.T) {
 	data := []byte{0, 1, 3, 5}
-	inmem := &kiwi.InMemBlobStore{}
+	inmem := &blob.InMemStore{}
 	firstAllocOffset, err := inmem.Alloc(data)
 	if err != nil {
 		t.Fatalf("Alloc() unexpected error: %+v", err)
