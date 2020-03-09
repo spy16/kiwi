@@ -6,7 +6,7 @@ package blob
 // binary data.
 type Store interface {
 	// Fetch returns the binary blob starting at the given offset. Returns
-	// error offset is invalid or any error occured during reading.
+	// error if offset is invalid or any error occured during reading.
 	Fetch(offset uint64) ([]byte, error)
 
 	// Alloc allocates space required to store the given data, stores it &
