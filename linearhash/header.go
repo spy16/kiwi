@@ -3,6 +3,7 @@ package linearhash
 import (
 	"errors"
 	"fmt"
+	"unsafe"
 )
 
 const (
@@ -12,16 +13,19 @@ const (
 	kiwiVersion uint32 = 0x01
 )
 
-type header struct {
-	magic       uint32
-	version     uint32
-	pageSz      uint32
-	slotCount   uint32
-	hashSeed    uint32
-	bucketCount uint32
+func headerFrom(buf []byte) *header {
+	return (*header)(unsafe.Pointer(&buf[0]))
 }
 
-func (h *header) validate() error {
+type header struct {
+	magic       uint32 // magic marker to indicate valid header
+	version     uint32 // version of the index file format
+	pageSz      uint32 // pageSz the index file was created with
+	bucketCount uint32 // number of buckets in the index
+	splitBucket uint32 // index of the bucket that will be split next
+}
+
+func (h header) validate() error {
 	if h.magic != kiwiMagic {
 		return errors.New("invalid magic in header")
 	}
@@ -40,4 +44,8 @@ func (h *header) validate() error {
 	}
 
 	return nil
+}
+
+func (h header) slotCount() int {
+	return int((h.pageSz - bucketSz) / slotSz)
 }

@@ -3,11 +3,10 @@ package linearhash
 import (
 	"bytes"
 	"fmt"
-	"hash/fnv"
+	"hash/maphash"
 	"io"
 	"os"
 	"sync"
-	"unsafe"
 
 	"github.com/edsrzf/mmap-go"
 )
@@ -43,12 +42,12 @@ func (lhs *Store) Get(key []byte) ([]byte, error) {
 	defer lhs.mu.RUnlock()
 
 	hash := lhs.hash(key)
-	buckets := lhs.bucketCursor(hash % lhs.bucketCount)
+	buckets := lhs.bucketCursor(uint32(hash % uint64(lhs.bucketCount)))
 
 	var val []byte
 
 	err := buckets.ForEach(func(b *bucket) (stop bool, err error) {
-		for i := 0; i < int(lhs.slotCount); i++ {
+		for i := 0; i < int(lhs.slotCount()); i++ {
 			sl := b.slot(i)
 			if sl.keySz == 0 || len(key) != int(sl.keySz) || sl.hash != hash {
 				continue
@@ -98,13 +97,13 @@ func (lhs *Store) Put(key, val []byte) error {
 
 	hash := lhs.hash(key)
 
-	buckets := lhs.bucketCursor(hash % 1)
+	buckets := lhs.bucketCursor(uint32(hash % 1))
 
 	var targetBucket *bucket
 	var targetSlot *slot
 
 	err = buckets.ForEach(func(b *bucket) (stop bool, err error) {
-		for i := 0; i < int(lhs.slotCount); i++ {
+		for i := 0; i < int(lhs.slotCount()); i++ {
 			sl := b.slot(i)
 			if sl.hash == 0 {
 				targetBucket = b
@@ -150,21 +149,20 @@ func (lhs Store) String() string {
 	)
 }
 
-func (lhs *Store) bucketCursor(idx uint32) *bucketCursor {
-	offset := (idx + 1) * lhs.pageSz
-	b := (*bucket)(unsafe.Pointer(&lhs.mf[offset]))
-	return &bucketCursor{
-		head: b,
+func (lhs *Store) bucketCursor(startBucket uint32) *bucketIterator {
+	offset := (startBucket + 1) * lhs.pageSz
+	return &bucketIterator{
+		head: bucketFrom(lhs.mf[offset:]),
 		blob: lhs.blobs,
 	}
 }
 
-func (lhs *Store) hash(key []byte) uint32 {
-	hasher := fnv.New32()
+func (lhs *Store) hash(key []byte) uint64 {
+	hasher := maphash.Hash{}
 	if _, err := hasher.Write(key); err != nil {
 		panic(err) // fnv never returns errors
 	}
-	return hasher.Sum32()
+	return hasher.Sum64()
 }
 
 func (lhs *Store) init() error {
@@ -177,15 +175,15 @@ func (lhs *Store) init() error {
 
 	// initialize the header with current system page size
 	// and other kiwi information
-	h := (*header)(unsafe.Pointer(&buf[0]))
+	h := headerFrom(buf)
 	h.magic = kiwiMagic
 	h.pageSz = uint32(pageSize)
 	h.version = kiwiVersion
-	h.slotCount = (h.pageSz - bucketSz) / slotSz
 	h.bucketCount = 1
+	h.splitBucket = 0
 
 	// initialize 1 bucket to begin with
-	b := (*bucket)(unsafe.Pointer(&buf[1*pageSize]))
+	b := bucketFrom(buf[1*os.Getpagesize():])
 	b.magic = bucketMagic
 	b.overflow = 0
 
@@ -199,9 +197,8 @@ func (lhs *Store) readHeader() error {
 	if _, err := lhs.index.ReadAt(buf[:], 0); err != nil {
 		return err
 	}
-	h := (*header)(unsafe.Pointer(&buf[0]))
-	lhs.header = *h
-	return h.validate()
+	lhs.header = *(headerFrom(buf[:]))
+	return lhs.header.validate()
 }
 
 func (lhs *Store) mmapFile() error {

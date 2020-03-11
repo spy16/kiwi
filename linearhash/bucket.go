@@ -16,6 +16,10 @@ const (
 	slotSz   = uint32(unsafe.Sizeof(slot{}))
 )
 
+func bucketFrom(buf []byte) *bucket {
+	return (*bucket)(unsafe.Pointer(&buf[1*pageSize]))
+}
+
 type bucket struct {
 	magic    uint8   // magic to identify validity of the bucket
 	flags    uint8   // flags to provide info about the bucket
@@ -24,13 +28,13 @@ type bucket struct {
 }
 
 type slot struct {
-	hash       uint32 // hash value of the key
+	hash       uint64 // hash value of the key
 	keySz      uint16 // size of the key
 	valSz      uint32 // size of the value
 	blobOffset uint64 // offset for key-value in the blob store
 }
 
-type bucketCursor struct {
+type bucketIterator struct {
 	head *bucket
 	cur  *bucket
 	blob BlobStore
@@ -49,7 +53,7 @@ func (b *bucket) validate() error {
 	return nil
 }
 
-func (bc *bucketCursor) Next() error {
+func (bc *bucketIterator) Next() error {
 	if bc.cur == nil {
 		bc.cur = bc.head
 		return nil
@@ -65,12 +69,12 @@ func (bc *bucketCursor) Next() error {
 		return err
 	}
 
-	b := (*bucket)(unsafe.Pointer(&d[0]))
+	b := bucketFrom(d)
 	bc.cur = b
 	return b.validate()
 }
 
-func (bc *bucketCursor) ForEach(cb func(b *bucket) (stop bool, err error)) (err error) {
+func (bc *bucketIterator) ForEach(cb func(b *bucket) (stop bool, err error)) (err error) {
 	for err = bc.Next(); err == nil; err = bc.Next() {
 		stop, cbErr := cb(bc.cur)
 		if cbErr != nil || stop {

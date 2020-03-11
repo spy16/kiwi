@@ -10,7 +10,7 @@ func (lhs *Store) Stats() Stats {
 		Buckets:        int(lhs.bucketCount),
 		ReadOnly:       lhs.readOnly,
 		Closed:         lhs.closed,
-		SlotsPerBucket: int(lhs.slotCount),
+		SlotsPerBucket: int(lhs.slotCount()),
 	}
 }
 
