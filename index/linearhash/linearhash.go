@@ -3,21 +3,8 @@
 package linearhash
 
 import (
-	"errors"
 	"os"
 	"sync"
-)
-
-var (
-	// ErrNotFound is returned when a key is not found.
-	ErrNotFound = errors.New("key not found")
-
-	// ErrEmptyKey is returned when a key is zero sized.
-	ErrEmptyKey = errors.New("invalid sized key")
-
-	// ErrOpNotAllowed is returned when write operation (put/del)
-	// is attempted on a readonly.
-	ErrOpNotAllowed = errors.New("operation not allowed in read-only mode")
 )
 
 var defaultOptions = Options{
@@ -25,7 +12,7 @@ var defaultOptions = Options{
 	FileMode: os.ModePerm,
 }
 
-// Open opens the Linear Hashing index file and creates an Store instance.
+// Open opens the Linear Hashing index file and creates a Store instance.
 // If nil value is provided for options, defaultOptions are used.
 func Open(indexFile string, store BlobStore, opts *Options) (*Store, error) {
 	if opts == nil {

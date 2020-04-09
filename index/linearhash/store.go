@@ -1,7 +1,6 @@
 package linearhash
 
 import (
-	"bytes"
 	"fmt"
 	"hash/maphash"
 	"io"
@@ -9,12 +8,13 @@ import (
 	"sync"
 
 	"github.com/edsrzf/mmap-go"
+	"github.com/spy16/kiwi/index"
 )
 
 var pageSize = os.Getpagesize()
 
-// Store implements a kiwi storage backend using Linear Hasing based
-// disk backed hash-table.
+// Store implements a kiwi storage backend with indexing scheme based on
+// on-disk hash table using Lienar Hashing algorithm.
 // Refer https://en.wikipedia.org/wiki/Linear_hashing
 type Store struct {
 	header
@@ -35,56 +35,23 @@ type Store struct {
 // otherwise.
 func (lhs *Store) Get(key []byte) ([]byte, error) {
 	if len(key) == 0 {
-		return nil, ErrEmptyKey
+		return nil, index.ErrEmptyKey
 	}
 
 	lhs.mu.RLock()
 	defer lhs.mu.RUnlock()
 
-	hash := lhs.hash(key)
-	buckets := lhs.bucketCursor(uint32(hash % uint64(lhs.bucketCount)))
-
-	var val []byte
-
-	err := buckets.ForEach(func(b *bucket) (stop bool, err error) {
-		for i := 0; i < int(lhs.slotCount()); i++ {
-			sl := b.slot(i)
-			if sl.keySz == 0 || len(key) != int(sl.keySz) || sl.hash != hash {
-				continue
-			}
-
-			b, err := lhs.blobs.Fetch(sl.blobOffset)
-			if err != nil {
-				return false, err
-			}
-
-			k, v := unpackKV(b, int(sl.keySz))
-			if bytes.Equal(k, key) {
-				val = v
-				return true, nil
-			}
-
-			return false, nil
-		}
-		return false, nil
-	})
-	if err != nil {
-		if err == io.EOF {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-
-	return val, nil
+	return nil, nil
 }
 
 // Put puts the key and the value offset into the hash index.
 func (lhs *Store) Put(key, val []byte) error {
 	if lhs.readOnly {
-		return ErrOpNotAllowed
+		return index.ErrOpNotAllowed
 	} else if len(key) == 0 {
-		return ErrEmptyKey
+		return index.ErrEmptyKey
 	}
+
 	lhs.mu.Lock()
 	defer lhs.mu.Unlock()
 

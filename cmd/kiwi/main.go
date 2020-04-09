@@ -3,10 +3,10 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"log"
 	"os"
 
-	"github.com/spy16/kiwi/blob"
-	"github.com/spy16/kiwi/linearhash"
+	"github.com/spy16/kiwi"
 )
 
 var file = flag.String("file", "kiwi.db", "DB file path")
@@ -14,19 +14,16 @@ var file = flag.String("file", "kiwi.db", "DB file path")
 func main() {
 	flag.Parse()
 
-	inmem := &blob.InMemStore{}
-
-	lhs, err := linearhash.Open(*file, inmem, nil)
+	db, err := kiwi.Open(*file, nil)
 	if err != nil {
-		panic(err)
+		log.Fatalf("failed to open: %v", err)
 	}
-	defer lhs.Close()
 
-	printStats(lhs)
+	printStats(db)
 }
 
-func printStats(lhs *linearhash.Store) {
+func printStats(db *kiwi.DB) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
-	_ = enc.Encode(lhs.Stats())
+	_ = enc.Encode(db.Stats())
 }
