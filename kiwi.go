@@ -2,6 +2,7 @@ package kiwi
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 )
@@ -12,10 +13,6 @@ const (
 )
 
 var (
-	// ErrClosed is returned when an operation is performed on a closed
-	// Kiwi DB instance.
-	ErrClosed = errors.New("invalid operation on closed db")
-
 	// ErrNotFound is returned when value for a key is not found in the
 	// database.
 	ErrNotFound = errors.New("key not found")
@@ -25,7 +22,8 @@ var (
 	ErrImmutable = errors.New("can't put/delete into closed/read-only DB")
 )
 
-// Open opens the kiwi database file at given filepath.
+// Open opens the kiwi database file at given filePath. If the filePath is ":memory:"
+// an in-memory instance (without any persistence) is created.
 func Open(filePath string, opts *Options) (*DB, error) {
 	if opts == nil {
 		opts = &defaultOptions
@@ -35,18 +33,16 @@ func Open(filePath string, opts *Options) (*DB, error) {
 
 	db := &DB{
 		// populate configs
-		log:        opts.Log,
 		filePath:   filePath,
 		isReadOnly: opts.ReadOnly,
 
 		// internal states
 		mu:     &sync.RWMutex{},
 		isOpen: false,
-		pageSz: os.Getpagesize(), // might be overriden by opened file
 	}
 
 	if err := db.open(opts.FileMode); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	db.isOpen = true
@@ -59,11 +55,9 @@ type DB struct {
 	// external configs
 	filePath   string
 	isReadOnly bool
-	log        func(msg string, args ...interface{})
 
 	// internal state
 	mu      *sync.RWMutex
-	pageSz  int
 	isOpen  bool
 	backend Backend
 }
@@ -118,45 +112,17 @@ func (db *DB) Close() error {
 	return err
 }
 
-// Stats returns current metrics and statistics for the DB instance.
-func (db *DB) Stats() Stats {
-	return Stats{}
-}
-
 func (db *DB) open(mode os.FileMode) error {
 	if db.filePath == ":memory:" {
 		db.backend = &inMemory{}
 		return nil
 	}
 
-	fh, err := openFile(db.filePath, db.isReadOnly, mode)
-	if err != nil {
-		return err
-	}
-
-	stat, err := fh.Stat()
-	if err != nil {
-		fh.Close()
-		return err
-	}
-
-	if stat.Size() > 0 {
-		return db.openExisting(fh)
-	}
-
-	return nil
+	return fmt.Errorf("failed to detect backend from file '%s'", db.filePath)
 }
 
-func (db *DB) openExisting(f *os.File) error {
-	return nil
-}
-
-func (db *DB) initializeNew(f *os.File) error {
-	return nil
+func (db *DB) String() string {
+	return fmt.Sprintf("DB{file='%s', readOnly=%t}", db.filePath, db.isReadOnly)
 }
 
 func (db *DB) isMutable() bool { return db.isReadOnly || !db.isOpen }
-
-// Stats represents information about the datbase instance.
-type Stats struct {
-}

@@ -1,10 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
-	"os"
 
 	"github.com/spy16/kiwi"
 )
@@ -19,11 +18,5 @@ func main() {
 		log.Fatalf("failed to open: %v", err)
 	}
 
-	printStats(db)
-}
-
-func printStats(db *kiwi.DB) {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(db.Stats())
+	fmt.Println(db)
 }

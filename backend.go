@@ -28,7 +28,7 @@ func (mem *inMemory) Get(key []byte) ([]byte, error) {
 	if !found {
 		return nil, ErrNotFound
 	}
-	return []byte(v), nil
+	return v, nil
 }
 
 func (mem *inMemory) Put(key []byte, val []byte) error {
