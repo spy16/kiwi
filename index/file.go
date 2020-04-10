@@ -1,9 +1,6 @@
 package index
 
 import (
-	"encoding"
-	"errors"
-	"io"
 	"os"
 
 	"github.com/edsrzf/mmap-go"
@@ -24,20 +21,48 @@ func OpenFile(filePath string, flag int, mode os.FileMode) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &File{File: fh}, nil
+	return &File{fh: fh}, nil
 }
 
 // File is a wrapper around os.File and provides additional functions for
 // dealing with files.
 type File struct {
-	*os.File
-	data   mmap.MMap
+	fh     *os.File
 	locked bool
+	data   mmap.MMap
+}
+
+// Truncate truncates the file to given size. Truncate frees the memory
+// mapping before resize.
+func (f *File) Truncate(size int64) error {
+	_ = f.MUnmap()
+	return f.fh.Truncate(size)
+}
+
+func (f *File) ReadAt(b []byte, offset int64) (int, error) {
+	if f.data == nil {
+		return f.fh.ReadAt(b, offset)
+	}
+	return copy(b, f.data[offset:]), nil
+}
+
+func (f *File) WriteAt(b []byte, offset int64) (int, error) {
+	if f.data == nil {
+		return f.fh.WriteAt(b, offset)
+	}
+	return copy(f.data[offset:], b), nil
+}
+
+// Close flushes any pending write in case of memory mapped file, and
+// closes the underlying file handle.
+func (f *File) Close() error {
+	_ = f.MUnmap()
+	return f.fh.Close()
 }
 
 // Size returns the size of the file.
 func (f *File) Size() (int64, error) {
-	stat, err := f.Stat()
+	stat, err := f.fh.Stat()
 	if err != nil {
 		return 0, err
 	}
@@ -46,7 +71,7 @@ func (f *File) Size() (int64, error) {
 
 // MMap memory maps the file to an internal bytes buffer.
 func (f *File) MMap(flag int, lock bool) error {
-	m, err := mmap.Map(f.File, flag, 0)
+	m, err := mmap.Map(f.fh, flag, 0)
 	if err != nil {
 		return err
 	}
@@ -62,27 +87,7 @@ func (f *File) MUnmap() error {
 	if f.locked {
 		_ = f.data.Unlock()
 	}
-	return f.data.Unmap()
-}
-
-// BinaryWrite marshals and writes the data to the writer.
-func BinaryWrite(f io.WriterAt, offset int64, m encoding.BinaryMarshaler) error {
-	d, err := m.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	_, err = f.WriteAt(d, offset)
+	err := f.data.Unmap()
+	f.data = nil
 	return err
-}
-
-// BinaryRead reads data from the reader at offset and un-marshals using 'into'.
-func BinaryRead(f io.ReaderAt, offset int64, size int, into encoding.BinaryUnmarshaler) error {
-	buf := make([]byte, size)
-	n, err := f.ReadAt(buf, offset)
-	if err != nil {
-		return err
-	} else if n < size {
-		return errors.New("read insufficient data")
-	}
-	return into.UnmarshalBinary(buf)
 }

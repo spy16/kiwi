@@ -47,7 +47,7 @@ func (lhs *Store) Get(key []byte) ([]byte, error) {
 // Put puts the key and the value offset into the hash index.
 func (lhs *Store) Put(key, val []byte) error {
 	if lhs.readOnly {
-		return index.ErrOpNotAllowed
+		return index.ErrImmutable
 	} else if len(key) == 0 {
 		return index.ErrEmptyKey
 	}
