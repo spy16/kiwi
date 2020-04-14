@@ -32,7 +32,10 @@ func OpenFile(filePath string, flag int, mode os.FileMode) (File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &OnDisk{fh: fh}, nil
+	return &OnDisk{
+		mu: &sync.RWMutex{},
+		fh: fh,
+	}, nil
 }
 
 // File represents a file-like object. (An in-memory or on-disk).

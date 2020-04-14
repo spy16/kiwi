@@ -1,4 +1,4 @@
-package bptree
+package linearhash
 
 import (
 	"encoding"
@@ -26,8 +26,6 @@ func Test_header(t *testing.T) {
 			magic:   magic,
 			version: version,
 			pageSz:  0x1000,
-			flags:   0xFF,
-			degree:  0x01,
 		}
 
 		data, err := original.MarshalBinary()

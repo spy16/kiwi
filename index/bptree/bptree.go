@@ -1,14 +1,25 @@
 package bptree
 
 import (
+	"fmt"
 	"os"
 	"sync"
 
+	"github.com/spy16/kiwi/index"
 	"github.com/spy16/kiwi/io"
 )
 
-// Open opens file at given filePath as B+ tree index file and returns BPlusTree
-// instance. If 'opts' value is nil, default options are used.
+const (
+	// magic marker to indicate B+ tree index file.
+	// hex version of 'bptree'
+	magic   = uint32(0x62707472)
+	version = 0x1
+)
+
+var _ index.Index = (*BPlusTree)(nil)
+
+// Open opens file at filePath as B+ tree index file and returns BPlusTree
+// instance. If 'opts' value is nil, defaultOptions will be used.
 func Open(filePath string, opts *Options) (*BPlusTree, error) {
 	if opts == nil {
 		opts = &defaultOptions
@@ -25,14 +36,19 @@ func Open(filePath string, opts *Options) (*BPlusTree, error) {
 	}
 
 	tree := &BPlusTree{
-		mu:     &sync.RWMutex{},
-		file:   fh,
-		order:  opts.Order,
-		pageSz: os.Getpagesize(),
+		mu:       &sync.RWMutex{},
+		file:     fh,
+		pageSz:   os.Getpagesize(),
+		readOnly: opts.ReadOnly,
 	}
 
 	if err := tree.open(); err != nil {
 		_ = fh.Close()
+		return nil, err
+	}
+
+	if err := tree.file.MMap(io.RDWR, true); err != nil {
+		_ = tree.Close()
 		return nil, err
 	}
 
@@ -41,16 +57,10 @@ func Open(filePath string, opts *Options) (*BPlusTree, error) {
 
 // BPlusTree implements an on-disk B+ Tree.
 type BPlusTree struct {
-	order  int
-	pageSz int
-
-	mu   *sync.RWMutex
-	file io.File
-}
-
-// Put inserts the key value pair into the tree.
-func (tree *BPlusTree) Put(key, val []byte) error {
-	return nil
+	mu       *sync.RWMutex
+	file     io.File
+	pageSz   int
+	readOnly bool
 }
 
 // Close flushes any pending writes and frees the file descriptor.
@@ -65,6 +75,13 @@ func (tree *BPlusTree) Close() error {
 	err := tree.file.Close()
 	tree.file = nil
 	return err
+}
+
+func (tree *BPlusTree) String() string {
+	return fmt.Sprintf(
+		"BPlusTree{name='%s', closed=%t}",
+		tree.file.Name(), tree.file == nil,
+	)
 }
 
 func (tree *BPlusTree) open() error {
@@ -85,17 +102,18 @@ func (tree *BPlusTree) open() error {
 	}
 
 	tree.pageSz = int(h.pageSz)
-	tree.order = int(h.order)
 	return nil
 }
 
 func (tree *BPlusTree) init() error {
+	if tree.isImmutable() {
+		return index.ErrImmutable
+	}
+
 	h := &header{
-		magic:   0xABCDEF,
-		version: 0x1,
-		flags:   0,
+		magic:   magic,
+		version: version,
 		pageSz:  uint16(tree.pageSz),
-		order:   uint16(tree.order),
 	}
 
 	if err := tree.file.Truncate(int64(tree.pageSz)); err != nil {
@@ -103,4 +121,8 @@ func (tree *BPlusTree) init() error {
 	}
 
 	return io.BinaryWrite(tree.file, 0, h)
+}
+
+func (tree *BPlusTree) isImmutable() bool {
+	return tree.readOnly || tree.file == nil
 }

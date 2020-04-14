@@ -6,19 +6,15 @@ import (
 	"unsafe"
 )
 
-const (
-	magic   = 0xABCDEF
-	version = 0x1
-
-	headerSz = int(unsafe.Sizeof(header{}))
-)
+const headerSz = int(unsafe.Sizeof(header{}))
 
 type header struct {
-	magic   uint32
-	version uint16
-	flags   uint16
-	order   uint16
-	pageSz  uint16
+	magic   uint32 // magic marker to identify index file
+	version uint8  // version of the indexer implementation
+	flags   uint8  // any control flags (not used)
+	pageSz  uint16 // pageSize used while initializing the db.
+	degree  uint16 // degree of the B+ tree
+	root    uint64 // pointer to root node page
 }
 
 func (h header) Validate() error {
@@ -30,24 +26,30 @@ func (h header) Validate() error {
 		return fmt.Errorf("incompatible/unknown version: %#x", h.version)
 	}
 
+	if h.pageSz == 0 {
+		return fmt.Errorf("invalid page size: %d", h.pageSz)
+	}
+
+	if h.degree == 0 {
+		return fmt.Errorf("invalid tree order: %d", h.degree)
+	}
+
 	return nil
 }
 
-func (h *header) MarshalBinary() ([]byte, error) {
-	if h == nil {
-		return nil, errors.New("can't marshal nil header")
-	}
-	b := (*[]byte)(unsafe.Pointer(&h))
-	return (*b)[0:headerSz], nil
+func (h header) MarshalBinary() ([]byte, error) {
+	mem := (*[0xFFFF]byte)(unsafe.Pointer(&h))
+	return append([]byte(nil), (*mem)[0:headerSz]...), nil
 }
 
 func (h *header) UnmarshalBinary(d []byte) error {
 	if h == nil {
-		return errors.New("can't unamarshal into nil header")
+		return errors.New("cannot unamarshal into nil header")
 	} else if len(d) < headerSz {
 		return fmt.Errorf("need at-least %d bytes, got only %d", headerSz, len(d))
 	}
 
-	*h = (*[0xFFFFFF]header)(unsafe.Pointer(&d[0]))[0]
+	headers := (*[0xFFFFF]header)(unsafe.Pointer(&d[0]))
+	*h = (*headers)[0]
 	return nil
 }
