@@ -1,86 +1,13 @@
 package linearhash
 
-import (
-	"errors"
-	"io"
-	"unsafe"
-)
-
-const (
-	bucketMagic uint8 = 0xBA
-
-	// bucket flags
-	bucketHasOverflow = 0x1
-
-	bucketSz = uint32(unsafe.Sizeof(bucket{}))
-	slotSz   = uint32(unsafe.Sizeof(slot{}))
-)
-
-func bucketFrom(buf []byte) *bucket {
-	return (*bucket)(unsafe.Pointer(&buf[1*pageSize]))
-}
-
 type bucket struct {
-	magic    uint8   // magic to identify validity of the bucket
-	flags    uint8   // flags to provide info about the bucket
-	overflow uint64  // overflow bucket offset in blob-store
-	ptr      uintptr // pointer to slots
 }
 
-type slot struct {
-	hash       uint64 // hash value of the key
-	keySz      uint16 // size of the key
-	valSz      uint32 // size of the value
-	blobOffset uint64 // offset for key-value in the blob store
-}
-
-type bucketIterator struct {
-	head *bucket
-	cur  *bucket
-	blob BlobStore
-}
-
-func (b *bucket) slot(id int) *slot {
-	slots := (*[0x7FFFFFF]slot)(unsafe.Pointer(&b.ptr))
-	return &(slots)[id]
-}
-
-func (b *bucket) validate() error {
-	if b.magic != bucketMagic {
-		return errors.New("invalid bucket magic")
-	}
-
-	return nil
-}
-
-func (bc *bucketIterator) Next() error {
-	if bc.cur == nil {
-		bc.cur = bc.head
-		return nil
-	}
-
-	if bc.cur.flags&bucketHasOverflow == 0 {
-		// has no overflow bucket
-		return io.EOF
-	}
-
-	d, err := bc.blob.Fetch(bc.cur.overflow)
-	if err != nil {
-		return err
-	}
-
-	b := bucketFrom(d)
-	bc.cur = b
-	return b.validate()
-}
-
-func (bc *bucketIterator) ForEach(cb func(b *bucket) (stop bool, err error)) (err error) {
-	for err = bc.Next(); err == nil; err = bc.Next() {
-		stop, cbErr := cb(bc.cur)
-		if cbErr != nil || stop {
-			return cbErr
-		}
-	}
-
-	return err
+type indexEntry struct {
+	Hash     uint64
+	Checksum uint64
+	KeySz    uint64
+	ValSz    uint64
+	BlobID   uint64
+	Key      []byte
 }

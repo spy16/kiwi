@@ -1,11 +1,10 @@
 package bptree
 
 import (
-	"io"
 	"os"
 	"sync"
 
-	"github.com/spy16/kiwi/index"
+	"github.com/spy16/kiwi/io"
 )
 
 // Open opens file at given filePath as B+ tree index file and returns BPlusTree
@@ -15,13 +14,25 @@ func Open(filePath string, opts *Options) (*BPlusTree, error) {
 		opts = &defaultOptions
 	}
 
+	flag := os.O_CREATE | os.O_RDWR
+	if opts.ReadOnly {
+		flag = os.O_RDONLY
+	}
+
+	fh, err := io.OpenFile(filePath, flag, opts.FileMode)
+	if err != nil {
+		return nil, err
+	}
+
 	tree := &BPlusTree{
 		mu:     &sync.RWMutex{},
+		file:   fh,
 		order:  opts.Order,
 		pageSz: os.Getpagesize(),
 	}
 
 	if err := tree.open(); err != nil {
+		_ = fh.Close()
 		return nil, err
 	}
 
@@ -34,13 +45,7 @@ type BPlusTree struct {
 	pageSz int
 
 	mu   *sync.RWMutex
-	file interface {
-		io.ReaderAt
-		io.WriterAt
-		io.Closer
-		Truncate(size int64) error
-		Size() (int64, error)
-	}
+	file io.File
 }
 
 // Put inserts the key value pair into the tree.
@@ -73,7 +78,7 @@ func (tree *BPlusTree) open() error {
 	}
 
 	h := header{}
-	if err := index.BinaryRead(tree.file, 0, headerSz, &h); err != nil {
+	if err := io.BinaryRead(tree.file, 0, headerSz, &h); err != nil {
 		return err
 	} else if h.Validate(); err != nil {
 		return err
@@ -97,5 +102,5 @@ func (tree *BPlusTree) init() error {
 		return err
 	}
 
-	return index.BinaryWrite(tree.file, 0, h)
+	return io.BinaryWrite(tree.file, 0, h)
 }

@@ -1,51 +1,51 @@
 package linearhash
 
 import (
+	"encoding/binary"
 	"errors"
-	"fmt"
 	"unsafe"
 )
 
 const (
-	// kiwiMagic is the marker to indicate the index file is a valid kiwi
-	// file.
-	kiwiMagic   uint32 = 0x6B697769
-	kiwiVersion uint32 = 0x01
+	kiwiMagic = uint32(0x6B697769) // magic marker
+	version   = uint16(0x1)        // indexer version
+
+	headerSz = int(unsafe.Sizeof(header{}))
 )
 
-func headerFrom(buf []byte) *header {
-	return (*header)(unsafe.Pointer(&buf[0]))
-}
-
 type header struct {
-	magic       uint32 // magic marker to indicate valid header
-	version     uint32 // version of the index file format
-	pageSz      uint32 // pageSz the index file was created with
-	bucketCount uint32 // number of buckets in the index
-	splitBucket uint32 // index of the bucket that will be split next
+	magic   uint32
+	version uint16
+	pageSz  uint16
 }
 
-func (h header) validate() error {
+func (h header) Validate() error {
 	if h.magic != kiwiMagic {
-		return errors.New("invalid magic in header")
+		return errors.New("invalid kiwi magic in header")
 	}
 
-	if h.version != kiwiVersion {
-		return fmt.Errorf("invalid/incompatible version: %d", h.version)
+	if h.version != version {
+		return errors.New("invalid db version in header")
 	}
 
 	if h.pageSz == 0 {
-		return errors.New("invalid page size in header")
-	}
-
-	if h.bucketCount == 0 {
-		// we initialize the db with at-least 1 bucket.
-		return errors.New("invalid bucket count")
+		return errors.New("page size not set in header")
 	}
 
 	return nil
 }
 
-func (h header) slotCount() int {
-	return int((h.pageSz - bucketSz) / slotSz)
+func (h header) MarshalBinary() ([]byte, error) {
+	b := make([]byte, headerSz)
+	binary.BigEndian.PutUint32(b[0:4], h.magic)
+	binary.BigEndian.PutUint16(b[4:6], h.version)
+	binary.BigEndian.PutUint16(b[6:8], h.pageSz)
+	return b, nil
+}
+
+func (h *header) UnmarshalBinary(data []byte) error {
+	h.magic = binary.BigEndian.Uint32(data[0:4])
+	h.version = binary.BigEndian.Uint16(data[4:6])
+	h.pageSz = binary.BigEndian.Uint16(data[6:8])
+	return nil
 }
