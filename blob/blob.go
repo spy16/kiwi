@@ -1,58 +1,49 @@
 package blob
 
 import (
-	"io"
-	"unsafe"
+	"encoding"
 )
 
-const pageHeaderSz = int(unsafe.Sizeof(pageHeader{}))
-
-// Blob represents a blob of binary data composed of multiple pages.
+// Blob is a handle to a blob of binary data in a store.
 type Blob struct {
-	id        int
-	pageSize  int    // size of one page
-	totalSize int    // total size of the blob
-	readSize  int    // total data read
-	data      []byte // data that has been read
-
-	pager interface {
-		alloc() (int, error)
-		read(id int) ([]byte, error)
-		write(id int, d []byte) error
-	}
+	id   int    // id of the first page in the blob
+	size int    // size of the entire blob
+	data []byte // data that has been read so far
+	file Pager  // underlying paged file
 }
 
-// ID returns the id of this blob record which is same as the id of the
-// first page.
-func (b Blob) ID() int { return b.id }
+// Marshal writes the data obtained using 'from' to the blob.
+func (b *Blob) Marshal(from encoding.BinaryMarshaler) error {
+	return nil
+}
 
-// Size returns the total blob size.
-func (b Blob) Size() int { return b.totalSize }
+// Unmarshal reads data of the entire blob and unmarshals it using 'into'.
+func (b Blob) Unmarshal(into encoding.BinaryUnmarshaler) error {
+	return nil
+}
 
-// ReadAt reads the data from the blob into the given buffer. Actual file
-// read is always done in pages.
-func (b Blob) ReadAt(buf []byte, offset int64) (n int, err error) {
-	if len(buf) == 0 {
-		return 0, nil
-	} else if int(offset) >= b.totalSize {
-		return 0, io.EOF
+func (b *Blob) open(d []byte) error {
+	h := blobHeader{}
+	if err := h.UnmarshalBinary(d); err != nil {
+		return err
 	}
 
-	return 0, nil
+	b.size = int(h.totalSize)
+	b.data = append(d[blobHeaderSz:h.size])
+	return nil
 }
 
-// Flush flushes the data to the underlying file.
-func (b *Blob) Flush() error { return nil }
+func (b *Blob) init() error {
+	h := blobHeader{
+		flags: 0, // in use
+		size:  0, // no data apart from header
+		next:  0, // no next pointer
+	}
 
-type page struct {
-	id    int
-	data  []byte
-	dirty bool // has unsaved changes?
+	d, _ := h.MarshalBinary()
+	return b.file.Write(b.id, d)
 }
 
-type pageHeader struct {
-	nextPage    uint32 // pointer to next page
-	prevPage    uint32 // pointer to previous page
-	flags       uint16 // deleted etc
-	contentSize uint16 // size of actual content
+func (b *Blob) maxContentSize() int {
+	return b.file.PageSize() - blobHeaderSz
 }
