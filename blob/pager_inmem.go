@@ -13,6 +13,11 @@ type InMemory struct {
 	closed bool
 }
 
+// Count returns the total number of pages.
+func (mem *InMemory) Count() int {
+	return len(mem.pages)
+}
+
 // PageSize should return the size of one page in.
 func (mem *InMemory) PageSize() int {
 	return os.Getpagesize()

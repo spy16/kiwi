@@ -112,6 +112,9 @@ func (pf *OnDisk) Write(id int, d []byte) error {
 	return pf.writeAt(d, offset)
 }
 
+// Count returns the number of pages in the underlying file.
+func (pf *OnDisk) Count() int { return pf.pageCount }
+
 // PageSize returns the size of one page managed by this pager.
 func (pf *OnDisk) PageSize() int { return pf.pageSize }
 
