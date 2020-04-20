@@ -21,7 +21,7 @@ func (b bucket) next(idx *LinearHash) (*bucket, error) {
 	}
 
 	nextBucket := bucket{}
-	if err := idx.readPage(b.overflow, &nextBucket); err != nil {
+	if err := idx.pager.Unmarshal(int(b.overflow), &nextBucket); err != nil {
 		return nil, err
 	}
 

@@ -9,7 +9,7 @@ import (
 // New returns an instance of empty B+ Tree of given order.
 func New(order int) *BPlusTree {
 	if order <= 2 {
-		panic("")
+		panic("order cannot be 2 or less")
 	}
 
 	mgr := &inMemoryNodeManager{}
@@ -83,7 +83,7 @@ func (tree *BPlusTree) nodePut(node *node, key, val []byte) bool {
 		}
 
 		node.insertEntry(idx, key, val)
-		tree.splitRootIfNeeded(node)
+		tree.splitRoot()
 		return true
 	}
 
@@ -97,20 +97,22 @@ func (tree *BPlusTree) nodePut(node *node, key, val []byte) bool {
 		node.addChild(tree.leafKey(sibling), sibling)
 	}
 
-	tree.splitRootIfNeeded(node)
+	tree.splitRoot()
 	return true
 }
 
-func (tree *BPlusTree) splitRootIfNeeded(insertedIn *node) {
+func (tree *BPlusTree) splitRoot() {
 	if !tree.isOverflow(tree.root()) {
 		return
 	}
 
-	sibling := tree.split(insertedIn)
+	n := tree.root()
+
+	sibling := tree.split(n)
 
 	newRoot := tree.alloc()
 	newRoot.keys = [][]byte{tree.leafKey(sibling)}
-	newRoot.children = []nodeid{insertedIn.id, sibling.id}
+	newRoot.children = []nodeid{n.id, sibling.id}
 
 	tree.rootid = newRoot.id
 }

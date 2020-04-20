@@ -1,51 +1,124 @@
 package io
 
 import (
+	"errors"
 	"io"
 	"os"
-	"sync"
-
-	"github.com/edsrzf/mmap-go"
 )
 
-// Memory mapping flags. See MemoryMappedFile.
-const (
-	RDONLY = mmap.RDONLY
-	RDWR   = mmap.RDWR
-	COPY   = mmap.COPY
-	EXEC   = mmap.EXEC
+var (
+	_ RandomAccessFile = (*inMemory)(nil)
+	_ RandomAccessFile = (*os.File)(nil)
 )
 
-// OpenFile uses os.OpenFile with given flags and returns the wrapped File
-// instance. If the filePath is ":memory:", an in-memory file (ephemeral)
-// is returned.
-func OpenFile(filePath string, flag int, mode os.FileMode) (File, error) {
-	if filePath == InMemoryFilePath {
-		return &InMemory{
-			mu:       &sync.RWMutex{},
-			closed:   false,
-			readOnly: flag == 0,
-		}, nil
-	}
-
-	fh, err := os.OpenFile(filePath, flag, mode)
-	if err != nil {
-		return nil, err
-	}
-	return &OnDisk{
-		mu: &sync.RWMutex{},
-		fh: fh,
-	}, nil
-}
-
-// File represents a file-like object. (An in-memory or on-disk).
-type File interface {
+// RandomAccessFile represents a file-like object that can be read from and
+// written to at any offset.
+type RandomAccessFile interface {
 	io.ReaderAt
 	io.WriterAt
-	Name() string
-	Close() error
-	Size() (int64, error)
+	io.Closer
+
 	Truncate(size int64) error
-	MMap(flag int, lock bool) error
-	MUnmap() error
+	Name() string
+}
+
+type sizedFile interface {
+	RandomAccessFile
+	Size() int64
+}
+
+// inMemory implements an in-memory random access file.
+type inMemory struct {
+	closed   bool
+	data     []byte
+	readOnly bool
+}
+
+func (mem *inMemory) ReadAt(p []byte, off int64) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	} else if off < 0 {
+		return 0, &os.PathError{
+			Op:   "readat",
+			Path: InMemoryFileName,
+			Err:  errors.New("negative offset"),
+		}
+	} else if err := mem.canMutate("readat"); err != nil {
+		return 0, err
+	} else if int(off) >= len(mem.data) {
+		return 0, io.EOF
+	}
+
+	return copy(p, mem.data[off:]), nil
+}
+
+func (mem *inMemory) WriteAt(p []byte, off int64) (n int, err error) {
+	if len(p) == 0 {
+		return 0, nil
+	} else if off < 0 {
+		return 0, &os.PathError{
+			Op:   "writeat",
+			Path: InMemoryFileName,
+			Err:  errors.New("negative offset"),
+		}
+	} else if err := mem.canMutate("writeat"); err != nil {
+		return 0, err
+	}
+
+	_ = mem.Truncate(off + int64(len(p)))
+	return copy(mem.data[off:], p), nil
+}
+
+func (mem *inMemory) Close() error {
+	mem.closed = true
+	mem.data = nil
+	return nil
+}
+
+func (mem *inMemory) Truncate(size int64) error {
+	resizeBy := int(size) - len(mem.data)
+	if resizeBy >= 0 {
+		mem.data = append(mem.data, make([]byte, resizeBy)...)
+	} else {
+		mem.data = mem.data[:-1*resizeBy]
+	}
+	return nil
+}
+
+func (mem *inMemory) Size() int64 {
+	return int64(len(mem.data))
+}
+
+func (mem *inMemory) Name() string {
+	return InMemoryFileName
+}
+
+func (mem *inMemory) canMutate(op string) error {
+	if mem.readOnly {
+		return &os.PathError{
+			Op:   op,
+			Path: InMemoryFileName,
+			Err:  errors.New("read-only file"),
+		}
+	} else if mem.closed {
+		return errors.New("closed file")
+	}
+
+	return nil
+}
+
+func findSize(f RandomAccessFile) (int64, error) {
+	switch file := f.(type) {
+	case *os.File:
+		stat, err := file.Stat()
+		if err != nil {
+			return 0, err
+		}
+		return stat.Size(), nil
+
+	case sizedFile:
+		return file.Size(), nil
+	}
+
+	return 0, errors.New("failed to find file size")
 }

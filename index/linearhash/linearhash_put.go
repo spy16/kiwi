@@ -24,8 +24,13 @@ func (idx *LinearHash) locateSlot(key []byte) (res *bucket, slotID int, err erro
 	hash := idx.hash(key)
 	bucketID := idx.bucketIndex(hash)
 
+	bucketPage, err := idx.pager.Read(int(bucketID))
+	if err != nil {
+		return nil, 0, err
+	}
+
 	b := &bucket{}
-	if err := idx.readPage(bucketID, b); err != nil {
+	if err := b.UnmarshalBinary(bucketPage); err != nil {
 		return nil, 0, err
 	}
 
