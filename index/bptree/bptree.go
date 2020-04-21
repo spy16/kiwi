@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxKeySz = 4
+	maxKeySz = 100
 	version  = uint8(0x1)
 )
 
@@ -123,29 +123,43 @@ func (tree *BPlusTree) Put(key []byte, val uint64) error {
 	return tree.writeAll()
 }
 
+// Del removes the key from the B+ tree and returns that existed for the key.
+func (tree *BPlusTree) Del(key []byte) (uint64, error) {
+	return 0, errors.New("not implemented")
+}
+
 // Scan performs an index scan starting at the given key. Each entry will be
-// passed to the scanFunc.
-func (tree *BPlusTree) Scan(key []byte, scanFunc func(key []byte, v uint64) error) error {
+// passed to the scanFn. If the key is zero valued (nil or len=0), then the
+// left most leaf key will be used as the starting key.
+// Scan continues until the right most leaf node is reached or the scanFn
+// returns 'true' indicating to stop the scan.
+// TODO: all nodes are cached in-memory during scan which might not be good.
+func (tree *BPlusTree) Scan(key []byte, scanFn func(key []byte, v uint64) bool) error {
 	tree.mu.RLock()
 	defer tree.mu.RUnlock()
 
 	var err error
 	if len(key) == 0 {
+		// No explicit key provided by user, find the left-most leaf-key.
 		key, err = tree.leafKey(tree.root)
 		if err != nil {
 			return err
 		}
 	}
 
+	// find the leaf node with the given key or the leaf node that would
+	// contain the given key if it existed.
 	leaf, _, _, err := tree.searchRec(tree.root, key)
 	if err != nil {
 		return err
 	}
 
+	// starting at found leaf node, follow the 'next' pointer until.
 	for leaf != nil {
 		for i := 0; i < len(leaf.entries); i++ {
-			if err := scanFunc(leaf.entries[i].key, leaf.entries[i].val); err != nil {
-				return err
+			e := leaf.entries[i]
+			if scanFn(e.key, e.val) {
+				break
 			}
 		}
 
@@ -181,10 +195,7 @@ func (tree *BPlusTree) Close() error {
 }
 
 func (tree *BPlusTree) String() string {
-	return fmt.Sprintf(
-		"BPlusTree{pager=%v, size=%d, leafDegree=%d, internalDegree=%d}",
-		tree.pager, tree.size, tree.leafDegree, tree.internalDegree,
-	)
+	return fmt.Sprintf("BPlusTree{pager=%v, size=%d}", tree.pager, tree.size)
 }
 
 // nodePut recursively traverses the sub-tree with given root node until
@@ -341,6 +352,8 @@ func (tree *BPlusTree) alloc(n int) ([]*node, error) {
 	return nodes, nil
 }
 
+// fetchRoot reads the root from the underlying pager and sets it on the tree
+// instance if not already set.
 func (tree *BPlusTree) fetchRoot() error {
 	if tree.root != nil {
 		return nil
@@ -372,6 +385,10 @@ func (tree *BPlusTree) fetch(id int) (*node, error) {
 
 // writeAll writes all the nodes marked dirty to the underlying pager.
 func (tree *BPlusTree) writeAll() error {
+	if tree.pager.ReadOnly() {
+		return nil
+	}
+
 	for id, n := range tree.nodes {
 		if !n.dirty {
 			continue

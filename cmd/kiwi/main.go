@@ -13,7 +13,7 @@ var file = flag.String("file", "kiwi.db", "DB file path")
 func main() {
 	flag.Parse()
 
-	db, err := kiwi.Open(*file, nil)
+	db, err := kiwi.Open(*file, nil, nil)
 	if err != nil {
 		log.Fatalf("failed to open: %v", err)
 	}

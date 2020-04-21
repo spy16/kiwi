@@ -10,7 +10,7 @@ import (
 	"github.com/edsrzf/mmap-go"
 )
 
-const disableMmap = true
+const disableMmap = false
 
 // InMemoryFileName can be passed to Open() to create a pager for an ephemeral
 // in-memory file.
@@ -193,14 +193,6 @@ func (p *Pager) Unmarshal(id int, into encoding.BinaryUnmarshaler) error {
 	return into.UnmarshalBinary(d)
 }
 
-// Sync flushes any pending writes to underlying file.
-func (p *Pager) Sync() error {
-	if p.osFile != nil {
-		return p.osFile.Sync()
-	}
-	return nil
-}
-
 // PageSize returns the size of one page used by pager.
 func (p *Pager) PageSize() int { return p.pageSize }
 
@@ -251,7 +243,7 @@ func (p *Pager) mmap() error {
 		return err
 	}
 
-	d, err := mmap.Map(p.osFile, 0, 0)
+	d, err := mmap.Map(p.osFile, p.mmapFlag, 0)
 	if err != nil {
 		return err
 	}

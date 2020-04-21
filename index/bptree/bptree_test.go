@@ -19,15 +19,35 @@ func TestBPlusTree_Put_Get(t *testing.T) {
 		t.Errorf("expected tree size to be 0, not %d", tree.size)
 	}
 
-	insertKeys := 10000
+	t.Run("Batch", func(t *testing.T) {
+		insertKeys := 10000
 
-	writeLot(t, tree, insertKeys)
-	if tree.Size() != int64(insertKeys) {
-		t.Errorf("expected tree size to be %d, not %d", insertKeys, tree.Size())
-	}
+		writeLot(t, tree, insertKeys)
+		if tree.Size() != int64(insertKeys) {
+			t.Errorf("expected tree size to be %d, not %d", insertKeys, tree.Size())
+		}
+		readCheck(t, tree, insertKeys)
+		scanLot(t, tree, insertKeys)
+	})
 
-	readCheck(t, tree, insertKeys)
-	scanLot(t, tree, insertKeys)
+	t.Run("Update", func(t *testing.T) {
+		if err := tree.Put([]byte("hello"), 12345); err != nil {
+			t.Errorf("Put() unexpected error: %#v", err)
+		}
+
+		if err := tree.Put([]byte("hello"), 120012); err != nil {
+			t.Errorf("Put() unexpected error: %#v", err)
+		}
+
+		v, err := tree.Get([]byte("hello"))
+		if err != nil {
+			t.Errorf("Get('hello') unexpected error: %#v", err)
+		}
+
+		if v != 120012 {
+			t.Errorf("expected value of key 'hello' to be 120012, not %d", v)
+		}
+	})
 }
 
 func BenchmarkBPlusTree_Put_Get(b *testing.B) {
@@ -85,12 +105,12 @@ func readCheck(t *testing.T, tree *BPlusTree, count int) {
 func scanLot(t *testing.T, tree *BPlusTree, count int) {
 	start := time.Now()
 	scanned := uint64(0)
-	_ = tree.Scan(nil, func(key []byte, v uint64) error {
+	_ = tree.Scan(nil, func(key []byte, v uint64) bool {
 		if v != scanned {
 			t.Fatalf("bad scan for '%x': %d != %d", key, v, scanned)
 		}
 		scanned++
-		return nil
+		return false
 	})
 
 	if int(scanned) != count {
