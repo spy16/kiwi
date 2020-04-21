@@ -73,7 +73,8 @@ func (idx *LinearHash) String() string {
 }
 
 func (idx *LinearHash) open() error {
-	if idx.pager.Count() == 0 { // empty file, so initialize it
+	if idx.pager.Count() == 0 {
+		// empty file, so initialize it
 		return idx.init()
 	}
 
@@ -89,6 +90,11 @@ func (idx *LinearHash) open() error {
 func (idx *LinearHash) init() error {
 	if idx.isImmutable() {
 		return index.ErrImmutable
+	}
+
+	_, err := idx.pager.Alloc(1)
+	if err != nil {
+		return err
 	}
 
 	return idx.pager.Marshal(0, header{

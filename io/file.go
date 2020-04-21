@@ -65,8 +65,13 @@ func (mem *inMemory) WriteAt(p []byte, off int64) (n int, err error) {
 		return 0, err
 	}
 
-	_ = mem.Truncate(off + int64(len(p)))
-	return copy(mem.data[off:], p), nil
+	spaceRequired := off + int64(len(p))
+	if int(spaceRequired) > len(mem.data) {
+		_ = mem.Truncate(spaceRequired)
+	}
+
+	n = copy(mem.data[off:], p)
+	return n, nil
 }
 
 func (mem *inMemory) Close() error {
@@ -76,12 +81,9 @@ func (mem *inMemory) Close() error {
 }
 
 func (mem *inMemory) Truncate(size int64) error {
-	resizeBy := int(size) - len(mem.data)
-	if resizeBy >= 0 {
-		mem.data = append(mem.data, make([]byte, resizeBy)...)
-	} else {
-		mem.data = mem.data[:-1*resizeBy]
-	}
+	d := mem.data
+	mem.data = make([]byte, size)
+	copy(mem.data, d)
 	return nil
 }
 

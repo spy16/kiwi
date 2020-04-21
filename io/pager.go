@@ -4,10 +4,13 @@ import (
 	"encoding"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/edsrzf/mmap-go"
 )
+
+const disableMmap = true
 
 // InMemoryFileName can be passed to Open() to create a pager for an ephemeral
 // in-memory file.
@@ -84,6 +87,11 @@ type Pager struct {
 	osFile   *os.File
 	data     mmap.MMap
 	mmapFlag int
+
+	// i/o tracking
+	writes int
+	reads  int
+	allocs int
 }
 
 // Alloc allocates 'n' new sequential pages and returns the id of the first
@@ -100,8 +108,15 @@ func (p *Pager) Alloc(n int) (int, error) {
 	if err := p.file.Truncate(targetSize); err != nil {
 		return 0, err
 	}
+
+	if p.osFile != nil {
+		if err := p.osFile.Sync(); err != nil {
+			return 0, err
+		}
+	}
 	p.fileSize = targetSize
 	p.computeCount()
+	p.allocs++
 	return p.count - 1, p.mmap()
 }
 
@@ -116,11 +131,19 @@ func (p *Pager) Read(id int) ([]byte, error) {
 
 	buf := make([]byte, p.pageSize)
 	if p.data != nil {
-		copy(buf, p.data[p.offset(id):p.pageSize])
+		n := copy(buf, p.data[p.offset(id):])
+		if n < p.pageSize {
+			return nil, io.EOF
+		}
+		p.reads++
 		return buf, nil
 	}
 
-	_, err := p.file.ReadAt(buf, p.offset(id))
+	n, err := p.file.ReadAt(buf, p.offset(id))
+	if n < p.pageSize {
+		return nil, io.EOF
+	}
+	p.reads++
 	return buf, err
 }
 
@@ -138,12 +161,17 @@ func (p *Pager) Write(id int, d []byte) error {
 	}
 
 	if p.data != nil {
-		copy(p.data[p.offset(id):p.pageSize], d)
+		copy(p.data[p.offset(id):], d)
+		p.writes++
 		return nil
 	}
 
 	_, err := p.file.WriteAt(d, p.offset(id))
-	return err
+	if err != nil {
+		return err
+	}
+	p.writes++
+	return nil
 }
 
 // Marshal writes the marshaled value of 'v' into page with given id.
@@ -165,21 +193,23 @@ func (p *Pager) Unmarshal(id int, into encoding.BinaryUnmarshaler) error {
 	return into.UnmarshalBinary(d)
 }
 
-// PageSize returns the size of one page used by pager.
-func (p *Pager) PageSize() int {
-	return p.pageSize
+// Sync flushes any pending writes to underlying file.
+func (p *Pager) Sync() error {
+	if p.osFile != nil {
+		return p.osFile.Sync()
+	}
+	return nil
 }
+
+// PageSize returns the size of one page used by pager.
+func (p *Pager) PageSize() int { return p.pageSize }
 
 // Count returns the number of pages in the underlying file. Returns error if
 // the file is closed.
-func (p *Pager) Count() int {
-	return p.count
-}
+func (p *Pager) Count() int { return p.count }
 
 // ReadOnly returns true if the pager instance is in read-only mode.
-func (p *Pager) ReadOnly() bool {
-	return p.readOnly
-}
+func (p *Pager) ReadOnly() bool { return p.readOnly }
 
 // Close closes the underlying file and marks the pager as closed for use.
 func (p *Pager) Close() error {
@@ -213,7 +243,7 @@ func (p *Pager) offset(id int) int64 {
 }
 
 func (p *Pager) mmap() error {
-	if p.osFile == nil || p.file == nil || p.fileSize <= 0 {
+	if disableMmap || p.osFile == nil || p.file == nil || p.fileSize <= 0 {
 		return nil
 	}
 
