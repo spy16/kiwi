@@ -99,10 +99,8 @@ func (tree *BPlusTree) Put(key []byte, val uint64) error {
 	tree.mu.Lock()
 	defer tree.mu.Unlock()
 
-	if tree.pager == nil {
-		return os.ErrClosed
-	} else if tree.pager.ReadOnly() {
-		return index.ErrImmutable
+	if err := tree.canMutate(); err != nil {
+		return err
 	}
 
 	e := entry{
@@ -125,7 +123,29 @@ func (tree *BPlusTree) Put(key []byte, val uint64) error {
 
 // Del removes the key from the B+ tree and returns that existed for the key.
 func (tree *BPlusTree) Del(key []byte) (uint64, error) {
-	return 0, errors.New("not implemented")
+	if len(key) > int(tree.maxKeySz) {
+		return 0, errors.New("key is too large")
+	} else if len(key) == 0 {
+		return 0, index.ErrEmptyKey
+	}
+
+	tree.mu.Lock()
+	defer tree.mu.Unlock()
+
+	if err := tree.canMutate(); err != nil {
+		return 0, err
+	}
+
+	leaf, idx, found, err := tree.searchRec(tree.root, key)
+	if err != nil {
+		return 0, err
+	} else if !found {
+		return 0, index.ErrKeyNotFound
+	}
+
+	// TODO: delete the key from the leaf node and rebalance if required
+
+	return leaf.entries[idx].val, errors.New("not implemented")
 }
 
 // Scan performs an index scan starting at the given key. Each entry will be
@@ -462,4 +482,13 @@ func (tree *BPlusTree) init() error {
 
 func (tree *BPlusTree) writeMeta() error {
 	return tree.pager.Marshal(0, tree.metadata)
+}
+
+func (tree *BPlusTree) canMutate() error {
+	if tree.pager == nil {
+		return os.ErrClosed
+	} else if tree.pager.ReadOnly() {
+		return index.ErrImmutable
+	}
+	return nil
 }

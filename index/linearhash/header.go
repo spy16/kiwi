@@ -15,6 +15,9 @@ const (
 	headerSz = int(unsafe.Sizeof(header{}))
 )
 
+// header stores the information about the linear hash instance in the
+// file.
+// Note: Do not change the order of the fields.
 type header struct {
 	magic   uint32 // magic marker to indicate linear hash index file
 	version uint8  // version of the linear hash indexer implementation

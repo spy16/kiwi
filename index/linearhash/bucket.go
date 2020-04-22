@@ -33,10 +33,6 @@ func (b *bucket) slot(id int) *slot {
 	return &(slots)[id]
 }
 
-func (b bucket) Validate() error {
-	return nil
-}
-
 func (b bucket) MarshalBinary() ([]byte, error) {
 	mem := (*[0xFFFF]byte)(unsafe.Pointer(&b))
 	return append([]byte(nil), (*mem)[0:bucketSz]...), nil

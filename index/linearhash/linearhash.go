@@ -10,8 +10,8 @@ import (
 	"github.com/spy16/kiwi/io"
 )
 
-// Open opens the file as linear-hash indexing file and returns the
-// indexer instance. If 'opts' is nil, uses default options.
+// Open opens the file as linear-hash indexing file and returns the indexer
+// instance. If 'opts' is nil, uses default options.
 func Open(indexFile string, opts *Options) (*LinearHash, error) {
 	if opts == nil {
 		opts = &defaultOptions
@@ -26,7 +26,7 @@ func Open(indexFile string, opts *Options) (*LinearHash, error) {
 		mu:       &sync.RWMutex{},
 		pager:    p,
 		pageSize: p.PageSize(),
-		readOnly: opts.ReadOnly,
+		readOnly: p.ReadOnly(),
 	}
 
 	// read header if index file is initialized, or initialize if
@@ -49,6 +49,42 @@ type LinearHash struct {
 	slotCount int
 }
 
+// Get finds the index entry for given key in the hash table and returns. If
+// not entry found, returns ErrKeyNotFound.
+func (idx *LinearHash) Get(key []byte) (uint64, error) {
+	hash := idx.hash(key)
+
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	return idx.getEntry(key, hash)
+}
+
+// Put inserts the indexing entry into the hash table.
+func (idx *LinearHash) Put(key []byte, val uint64) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	if idx.isImmutable() {
+		return index.ErrImmutable
+	}
+
+	return idx.putEntry(entry{key: key, val: val})
+}
+
+// Del removes the entry for the given key from the hash table and returns
+// the removed entry.
+func (idx *LinearHash) Del(key []byte) (uint64, error) {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	if idx.isImmutable() {
+		return 0, index.ErrImmutable
+	}
+
+	return 0, index.ErrKeyNotFound
+}
+
 // Close flushes any pending writes and frees the file descriptor.
 func (idx *LinearHash) Close() error {
 	idx.mu.Lock()
@@ -68,6 +104,47 @@ func (idx *LinearHash) String() string {
 		"LinearHash{pager='%s', closed=%t}",
 		idx.pager, idx.pager == nil,
 	)
+}
+
+func (idx *LinearHash) getEntry(key []byte, hash uint64) (uint64, error) {
+	return 0, nil
+}
+
+func (idx *LinearHash) putEntry(e entry) error {
+	return nil
+}
+
+func (idx *LinearHash) locateSlot(key []byte) (res *bucket, slotID int, err error) {
+	hash := idx.hash(key)
+	bucketID := idx.bucketIndex(hash)
+
+	bucketPage, err := idx.pager.Read(int(bucketID))
+	if err != nil {
+		return nil, 0, err
+	}
+
+	b := &bucket{}
+	if err := b.UnmarshalBinary(bucketPage); err != nil {
+		return nil, 0, err
+	}
+
+	for b != nil {
+		for i := 0; i < int(idx.slotCount); i++ {
+			sl := b.slot(i)
+			if sl.hash == 0 { // an empty slot
+				return b, i, nil
+			} else if sl.hash == hash {
+				return b, i, nil
+			}
+		}
+
+		b, err = b.next(idx) // follow the bucket overflow pointer
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	return nil, 0, nil
 }
 
 func (idx *LinearHash) open() error {
@@ -116,4 +193,9 @@ func (idx *LinearHash) hash(key []byte) uint64 {
 
 func (idx *LinearHash) bucketIndex(hash uint64) uint32 {
 	return 0
+}
+
+type entry struct {
+	key []byte
+	val uint64
 }
