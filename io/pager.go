@@ -24,7 +24,7 @@ var ErrReadOnly = errors.New("read-only")
 // doesn't exist, it will be created if not in read-only mode.
 func Open(fileName string, readOnly bool, mode os.FileMode) (*Pager, error) {
 	if fileName == InMemoryFileName {
-		return newPager(&inMemory{}, readOnly, 0)
+		return newPager(&inMemory{}, os.Getpagesize(), readOnly, 0)
 	}
 
 	mmapFlag := mmap.RDWR
@@ -39,12 +39,12 @@ func Open(fileName string, readOnly bool, mode os.FileMode) (*Pager, error) {
 		return nil, err
 	}
 
-	return newPager(f, readOnly, mmapFlag)
+	return newPager(f, os.Getpagesize(), readOnly, mmapFlag)
 }
 
 // newPager creates an instance of pager for given random access file object.
 // By default page size is set to the current system page size.
-func newPager(file RandomAccessFile, readOnly bool, mmapFlag int) (*Pager, error) {
+func newPager(file RandomAccessFile, pageSize int, readOnly bool, mmapFlag int) (*Pager, error) {
 	size, err := findSize(file)
 	if err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func newPager(file RandomAccessFile, readOnly bool, mmapFlag int) (*Pager, error
 		file:     file,
 		fileSize: size,
 		readOnly: readOnly,
-		pageSize: os.Getpagesize(),
+		pageSize: pageSize,
 		osFile:   osFile,
 		mmapFlag: mmapFlag,
 	}
@@ -103,28 +103,26 @@ func (p *Pager) Alloc(n int) (int, error) {
 		return 0, ErrReadOnly
 	}
 
+	nextID := p.count
+
 	_ = p.unmap()
 	targetSize := p.fileSize + int64(n*p.pageSize)
 	if err := p.file.Truncate(targetSize); err != nil {
 		return 0, err
 	}
 
-	if p.osFile != nil {
-		if err := p.osFile.Sync(); err != nil {
-			return 0, err
-		}
-	}
 	p.fileSize = targetSize
 	p.computeCount()
+
 	p.allocs++
-	return p.count - 1, p.mmap()
+	return nextID, p.mmap()
 }
 
 // Read reads one page of data from the underlying file or mmapped region if
 // enabled.
 func (p *Pager) Read(id int) ([]byte, error) {
 	if id < 0 || id >= p.count {
-		return nil, errors.New("invalid page id")
+		return nil, fmt.Errorf("invalid page id (max=%d)", id)
 	} else if p.file == nil {
 		return nil, os.ErrClosed
 	}
@@ -151,7 +149,7 @@ func (p *Pager) Read(id int) ([]byte, error) {
 // the data is larger than a page.
 func (p *Pager) Write(id int, d []byte) error {
 	if id < 0 || id >= p.count {
-		return errors.New("invalid page id")
+		return fmt.Errorf("invalid page id=%d (max=%d)", id, p.count-1)
 	} else if len(d) > p.pageSize {
 		return errors.New("data is larger than a page")
 	} else if p.file == nil {
@@ -215,6 +213,15 @@ func (p *Pager) Close() error {
 	return err
 }
 
+// Stats returns i/o stats collected by this pager.
+func (p *Pager) Stats() Stats {
+	return Stats{
+		Allocs: p.allocs,
+		Reads:  p.reads,
+		Writes: p.writes,
+	}
+}
+
 func (p *Pager) String() string {
 	if p.file == nil {
 		return fmt.Sprintf("Pager{closed=true}")
@@ -256,4 +263,18 @@ func (p *Pager) unmap() error {
 		return nil
 	}
 	return p.data.Unmap()
+}
+
+// Stats represents I/O statistics collected by the pager.
+type Stats struct {
+	Writes int
+	Reads  int
+	Allocs int
+}
+
+func (s Stats) String() string {
+	return fmt.Sprintf(
+		"Stats{writes=%d, allocs=%d, reads=%d}",
+		s.Writes, s.Allocs, s.Reads,
+	)
 }

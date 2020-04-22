@@ -9,6 +9,10 @@ const metadataSz = int(unsafe.Sizeof(metadata{}))
 
 // metadata represents the metadata for the B+ tree stored in a file.
 type metadata struct {
+	// temporary state info
+	dirty bool
+
+	// actual metadata
 	version  uint8
 	flags    uint8
 	maxKeySz uint16

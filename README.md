@@ -1,5 +1,7 @@
 # kiwi
 
-> WIP
+Kiwi is a multi-backend key-value store written in Go.
 
-Kiwi is a multi-backend key-value database written in Go.
+## Features
+
+* Supports multiple indexing schemes (B+ tree, linear hashing)

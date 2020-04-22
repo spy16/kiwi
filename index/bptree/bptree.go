@@ -9,22 +9,24 @@ import (
 	"sync"
 
 	"github.com/spy16/kiwi/index"
-	"github.com/spy16/kiwi/io"
 )
 
-const (
-	maxKeySz = 100
-	version  = uint8(0x1)
+const version = uint8(0x1)
+
+var (
+	// bin is the byte order used by all marshal/unmarshal operations.
+	bin = binary.LittleEndian
+
+	// defaultOptions to be used by New().
+	defaultOptions = Options{
+		MaxKeySize: 100,
+	}
 )
 
-var bin = binary.LittleEndian
-
-// Open opens the named file as a B+ tree index file. If the file does not
-// exist, it will be created if not in read-only mode.
-func Open(fileName string, readOnly bool, mode os.FileMode) (*BPlusTree, error) {
-	p, err := io.Open(fileName, readOnly, mode)
-	if err != nil {
-		return nil, err
+// New initializes a new instance of B+ tree using the given pager.
+func New(p Pager, opts *Options) (*BPlusTree, error) {
+	if opts == nil {
+		opts = &defaultOptions
 	}
 
 	tree := &BPlusTree{
@@ -35,11 +37,15 @@ func Open(fileName string, readOnly bool, mode os.FileMode) (*BPlusTree, error) 
 		log:   log.Printf,
 	}
 
-	if err := tree.open(); err != nil {
+	if err := tree.open(*opts); err != nil {
 		_ = tree.Close()
 		return nil, err
 	}
-	tree.computeDegree(p.PageSize())
+
+	if err := tree.computeDegree(p.PageSize()); err != nil {
+		_ = tree.Close()
+		return nil, err
+	}
 
 	if err := tree.fetchRoot(); err != nil {
 		_ = tree.Close()
@@ -50,18 +56,18 @@ func Open(fileName string, readOnly bool, mode os.FileMode) (*BPlusTree, error) 
 }
 
 // BPlusTree represents an on-disk B+ tree. Each node in the tree is mapped
-// to a single page in the file. Order of the tree is  decided based on the
-// page size while initializing.
+// to a single page in the file. Degree of the tree is decided based on the
+// page size and max key size while initializing.
 type BPlusTree struct {
-	metadata
+	meta           metadata
 	leafDegree     int // max number of keys per leaf node
 	internalDegree int // max number of keys per internal node
 
 	// tree states
 	mu    *sync.RWMutex
-	pager *io.Pager
-	nodes map[int]*node
-	root  *node
+	pager Pager         // paged file
+	nodes map[int]*node // node cache
+	root  *node         // root node
 	log   func(msg string, args ...interface{})
 }
 
@@ -90,7 +96,7 @@ func (tree *BPlusTree) Get(key []byte) (uint64, error) {
 // Put puts the key-value pair into the B+ tree. If the key already exists, its
 // value will be updated.
 func (tree *BPlusTree) Put(key []byte, val uint64) error {
-	if len(key) > int(tree.maxKeySz) {
+	if len(key) > int(tree.meta.maxKeySz) {
 		return errors.New("key is too large")
 	} else if len(key) == 0 {
 		return errors.New("empty key")
@@ -114,7 +120,8 @@ func (tree *BPlusTree) Put(key []byte, val uint64) error {
 	}
 
 	if isInsert {
-		tree.size++
+		tree.meta.size++
+		tree.meta.dirty = true
 	}
 
 	// write all the nodes that were modified/created
@@ -123,7 +130,7 @@ func (tree *BPlusTree) Put(key []byte, val uint64) error {
 
 // Del removes the key from the B+ tree and returns that existed for the key.
 func (tree *BPlusTree) Del(key []byte) (uint64, error) {
-	if len(key) > int(tree.maxKeySz) {
+	if len(key) > int(tree.meta.maxKeySz) {
 		return 0, errors.New("key is too large")
 	} else if len(key) == 0 {
 		return 0, index.ErrEmptyKey
@@ -157,6 +164,10 @@ func (tree *BPlusTree) Del(key []byte) (uint64, error) {
 func (tree *BPlusTree) Scan(key []byte, scanFn func(key []byte, v uint64) bool) error {
 	tree.mu.RLock()
 	defer tree.mu.RUnlock()
+
+	if tree.meta.size == 0 {
+		return nil
+	}
 
 	var err error
 	if len(key) == 0 {
@@ -197,7 +208,7 @@ func (tree *BPlusTree) Scan(key []byte, scanFn func(key []byte, v uint64) bool) 
 }
 
 // Size returns the number of entries in the entire tree
-func (tree *BPlusTree) Size() int64 { return int64(tree.size) }
+func (tree *BPlusTree) Size() int64 { return int64(tree.meta.size) }
 
 // Close flushes any writes and closes the underlying pager.
 func (tree *BPlusTree) Close() error {
@@ -215,7 +226,7 @@ func (tree *BPlusTree) Close() error {
 }
 
 func (tree *BPlusTree) String() string {
-	return fmt.Sprintf("BPlusTree{pager=%v, size=%d}", tree.pager, tree.size)
+	return fmt.Sprintf("BPlusTree{pager=%v, size=%d}", tree.pager, tree.meta.size)
 }
 
 // nodePut recursively traverses the sub-tree with given root node until
@@ -247,11 +258,18 @@ func (tree *BPlusTree) nodePut(n *node, e entry) (bool, error) {
 		return false, err
 	}
 
+	if !isInsert {
+		return false, nil
+	}
+
 	if tree.isOverflow(child) {
-		right, err := tree.split(child)
+		nodes, err := tree.alloc(1)
 		if err != nil {
 			return false, err
 		}
+		right := nodes[0]
+
+		child.SplitRight(right)
 
 		leafKey, err := tree.leafKey(right)
 		if err != nil {
@@ -272,42 +290,32 @@ func (tree *BPlusTree) splitRootIfNeeded() error {
 		return nil
 	}
 
+	// we need a new root and a new right node. so allocate
+	// 2 at once.
+	nodes, err := tree.alloc(2)
+	if err != nil {
+		return err
+	}
+
 	oldRoot := tree.root
-	sibling, err := tree.split(oldRoot)
+	newRoot := nodes[0]
+	rightSibling := nodes[1]
+
+	oldRoot.SplitRight(rightSibling)
+
+	leafKey, err := tree.leafKey(rightSibling)
 	if err != nil {
 		return err
 	}
 
-	leafKey, err := tree.leafKey(sibling)
-	if err != nil {
-		return err
-	}
-
-	id, err := tree.pager.Alloc(1)
-	if err != nil {
-		return err
-	}
-
-	newRoot := newNode(id, int(tree.pageSz))
 	newRoot.entries = []entry{{key: leafKey}}
-	newRoot.children = []int{tree.root.id, sibling.id}
+	newRoot.children = []int{oldRoot.id, rightSibling.id}
 
 	tree.root = newRoot
-	tree.rootID = uint32(id)
 	tree.nodes[newRoot.id] = newRoot
+	tree.meta.rootID = uint32(newRoot.id)
+	tree.meta.dirty = true
 	return nil
-}
-
-// split splits the given node and returns its right sibling.
-func (tree *BPlusTree) split(n *node) (right *node, err error) {
-	nodes, err := tree.alloc(1)
-	if err != nil {
-		return
-	}
-
-	right = nodes[0]
-	n.SplitRight(right)
-	return right, nil
 }
 
 // isOverflow returns true if the node contains more entries/children
@@ -365,7 +373,7 @@ func (tree *BPlusTree) alloc(n int) ([]*node, error) {
 
 	var nodes []*node
 	for i := 0; i < n; i++ {
-		n := newNode(firstID+i, int(tree.pageSz))
+		n := newNode(firstID+i, int(tree.meta.pageSz))
 		tree.nodes[n.id] = n
 		nodes = append(nodes, n)
 	}
@@ -379,7 +387,7 @@ func (tree *BPlusTree) fetchRoot() error {
 		return nil
 	}
 
-	r, err := tree.fetch(int(tree.rootID))
+	r, err := tree.fetch(int(tree.meta.rootID))
 	if err != nil {
 		return err
 	}
@@ -395,10 +403,11 @@ func (tree *BPlusTree) fetch(id int) (*node, error) {
 	if found {
 		return n, nil
 	}
-	n = newNode(id, int(tree.pageSz))
+	n = newNode(id, int(tree.meta.pageSz))
 	if err := tree.pager.Unmarshal(id, n); err != nil {
 		return nil, err
 	}
+	n.dirty = false // we just read this node, not dirty
 	tree.nodes[n.id] = n
 	return n, nil
 }
@@ -409,13 +418,12 @@ func (tree *BPlusTree) writeAll() error {
 		return nil
 	}
 
-	for id, n := range tree.nodes {
-		if !n.dirty {
-			continue
-		}
-
-		if err := tree.pager.Marshal(id, n); err != nil {
-			return err
+	for _, n := range tree.nodes {
+		if n.dirty {
+			if err := tree.pager.Marshal(n.id, n); err != nil {
+				return err
+			}
+			n.dirty = false
 		}
 	}
 
@@ -424,7 +432,7 @@ func (tree *BPlusTree) writeAll() error {
 
 // computeDegree computes the degree of the tree based on page-size and the
 // maximum key size.
-func (tree *BPlusTree) computeDegree(pageSz int) {
+func (tree *BPlusTree) computeDegree(pageSz int) error {
 	// available for node content in leaf/internal nodes
 	leafContentSz := (pageSz - leafNodeHeaderSz)
 	internalContentSz := (pageSz - internalNodeHeaderSz)
@@ -433,27 +441,32 @@ func (tree *BPlusTree) computeDegree(pageSz int) {
 	const childPtrSz = 4    // for uint32 child pointer in non-leaf node
 	const keySizeSpecSz = 2 // for storing the actual key size
 
-	leafEntrySize := int(valueSz + 2 + tree.maxKeySz)                    // 8 bytes for the uint64 value
-	internalEntrySize := int(childPtrSz + keySizeSpecSz + tree.maxKeySz) // 4 bytes for the uint32 child pointer
+	leafEntrySize := int(valueSz + 2 + tree.meta.maxKeySz)                    // 8 bytes for the uint64 value
+	internalEntrySize := int(childPtrSz + keySizeSpecSz + tree.meta.maxKeySz) // 4 bytes for the uint32 child pointer
 
 	tree.leafDegree = leafContentSz / leafEntrySize
 
 	// 4 bytes extra for the one extra child pointer
 	tree.internalDegree = (internalContentSz - 4) / internalEntrySize
+
+	if tree.leafDegree <= 2 || tree.internalDegree <= 2 {
+		return errors.New("invalid degree, reduce key size or increase page size")
+	}
+	return nil
 }
 
-func (tree *BPlusTree) open() error {
+func (tree *BPlusTree) open(opts Options) error {
 	if tree.pager.Count() == 0 {
-		return tree.init()
+		return tree.init(opts)
 	}
 
-	if err := tree.pager.Unmarshal(0, &tree.metadata); err != nil {
+	if err := tree.pager.Unmarshal(0, &tree.meta); err != nil {
 		return err
 	}
 
-	if tree.version != version {
-		return fmt.Errorf("incompatible version %#x (expected: %#x)", tree.version, version)
-	} else if tree.pager.PageSize() != int(tree.pageSz) {
+	if tree.meta.version != version {
+		return fmt.Errorf("incompatible version %#x (expected: %#x)", tree.meta.version, version)
+	} else if tree.pager.PageSize() != int(tree.meta.pageSz) {
 		return errors.New("page size in meta does not match pager")
 	}
 
@@ -461,27 +474,35 @@ func (tree *BPlusTree) open() error {
 
 }
 
-func (tree *BPlusTree) init() error {
+func (tree *BPlusTree) init(opts Options) error {
 	// allocate 2 pages (1 for meta + 1 for root)
 	_, err := tree.pager.Alloc(2)
 	if err != nil {
 		return err
 	}
 
-	tree.metadata = metadata{
+	tree.root = newNode(1, tree.pager.PageSize())
+	tree.nodes[tree.root.id] = tree.root
+
+	tree.meta = metadata{
+		dirty:    true,
 		version:  version,
 		flags:    0,
 		size:     0,
 		rootID:   1,
 		pageSz:   uint16(tree.pager.PageSize()),
-		maxKeySz: maxKeySz,
+		maxKeySz: uint16(opts.MaxKeySize),
 	}
-
-	return tree.writeMeta()
+	return nil
 }
 
 func (tree *BPlusTree) writeMeta() error {
-	return tree.pager.Marshal(0, tree.metadata)
+	if tree.meta.dirty {
+		err := tree.pager.Marshal(0, tree.meta)
+		tree.meta.dirty = false
+		return err
+	}
+	return nil
 }
 
 func (tree *BPlusTree) canMutate() error {
@@ -491,4 +512,9 @@ func (tree *BPlusTree) canMutate() error {
 		return index.ErrImmutable
 	}
 	return nil
+}
+
+// Options represents the configuration options for the B+ tree index.
+type Options struct {
+	MaxKeySize int
 }

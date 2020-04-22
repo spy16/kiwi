@@ -9,14 +9,19 @@ import (
 )
 
 func TestBPlusTree_Put_Get(t *testing.T) {
-	tree, err := Open(":memory:", false, 0)
+	p, err := io.Open(":memory:", false, 0)
+	if err != nil {
+		t.Fatalf("failed to initialize pager: %#v", err)
+	}
+
+	tree, err := New(p, nil)
 	if err != nil {
 		t.Fatalf("failed to create in-memory tree: %#v", err)
 	}
 	defer tree.Close()
 
-	if tree.size != 0 {
-		t.Errorf("expected tree size to be 0, not %d", tree.size)
+	if tree.Size() != 0 {
+		t.Errorf("expected tree size to be 0, not %d", tree.Size())
 	}
 
 	t.Run("Batch", func(t *testing.T) {
@@ -48,10 +53,17 @@ func TestBPlusTree_Put_Get(t *testing.T) {
 			t.Errorf("expected value of key 'hello' to be 120012, not %d", v)
 		}
 	})
+
+	t.Logf("I/O Stats: %s", p.Stats())
 }
 
 func BenchmarkBPlusTree_Put_Get(b *testing.B) {
-	tree, err := Open(io.InMemoryFileName, false, 0)
+	p, err := io.Open(":memory:", false, 0)
+	if err != nil {
+		b.Fatalf("failed to initialize pager: %#v", err)
+	}
+
+	tree, err := New(p, nil)
 	if err != nil {
 		log.Fatalf("failed to init tree: %#v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 )
 
@@ -107,8 +108,11 @@ func (n *node) InsertAt(idx int, e entry) {
 
 // SetVal updates the value of the entry with given index.
 func (n *node) SetVal(entryIdx int, val uint64) {
-	n.dirty = true
-	n.entries[entryIdx].val = val
+	if val != n.entries[entryIdx].val {
+		log.Printf("val %d != %d", n.entries[entryIdx].val, val)
+		n.dirty = true
+		n.entries[entryIdx].val = val
+	}
 }
 
 // IsLeaf returns true if this node has no childrent. (i.e., it is
