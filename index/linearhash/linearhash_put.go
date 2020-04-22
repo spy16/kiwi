@@ -5,7 +5,7 @@ import (
 )
 
 // Put inserts the indexing entry into the hash table.
-func (idx *LinearHash) Put(entry index.Entry) error {
+func (idx *LinearHash) Put(key []byte, val uint64) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -13,10 +13,10 @@ func (idx *LinearHash) Put(entry index.Entry) error {
 		return index.ErrImmutable
 	}
 
-	return idx.putEntry(entry)
+	return idx.putEntry(entry{key: key, val: val})
 }
 
-func (idx *LinearHash) putEntry(entry index.Entry) error {
+func (idx *LinearHash) putEntry(e entry) error {
 	return nil
 }
 
@@ -51,4 +51,9 @@ func (idx *LinearHash) locateSlot(key []byte) (res *bucket, slotID int, err erro
 	}
 
 	return nil, 0, nil
+}
+
+type entry struct {
+	key []byte
+	val uint64
 }

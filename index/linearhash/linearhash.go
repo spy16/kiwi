@@ -10,8 +10,6 @@ import (
 	"github.com/spy16/kiwi/io"
 )
 
-var _ index.Index = (*LinearHash)(nil)
-
 // Open opens the file as linear-hash indexing file and returns the
 // indexer instance. If 'opts' is nil, uses default options.
 func Open(indexFile string, opts *Options) (*LinearHash, error) {

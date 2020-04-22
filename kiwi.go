@@ -3,7 +3,6 @@ package kiwi
 import (
 	"fmt"
 	"io"
-	"os"
 	"sync"
 
 	"github.com/spy16/kiwi/index"
@@ -11,17 +10,16 @@ import (
 )
 
 var _ Index = (*bptree.BPlusTree)(nil)
+var _ IndexScanner = (*bptree.BPlusTree)(nil)
 
 // Open opens a Kiwi database.
-func Open(filePath string, index Index, opts *Options) (*DB, error) {
+func Open(filePath string, opts *Options) (*DB, error) {
 	if opts == nil {
 		opts = &defaultOptions
 	}
 
 	if opts.Log == nil {
-		opts.Log = func(msg string, args ...interface{}) {
-			// no nop
-		}
+		opts.Log = func(msg string, args ...interface{}) {}
 	}
 
 	return nil, nil
@@ -39,7 +37,7 @@ type Index interface {
 // scans.
 type IndexScanner interface {
 	Index
-	Scan(beginKey []byte, scanFn func(key []byte, v uint64) error) error
+	Scan(beginKey []byte, scanFn func(key []byte, v uint64) bool) error
 }
 
 // BlobStore represents a storage for arbitrary blobs of binary data.
@@ -58,15 +56,6 @@ type BlobStore interface {
 	// Free should delete the blob with given identifier. Same id can
 	// be re-used for newer blobs.
 	Free(id uint64) error
-}
-
-var defaultOptions = Options{}
-
-// Options represents configuration settings for kiwi database.
-type Options struct {
-	ReadOnly bool
-	FileMode os.FileMode
-	Log      func(msg string, args ...interface{})
 }
 
 // DB represents an instance of Kiwi database.
@@ -128,14 +117,6 @@ func (db *DB) Put(key, val []byte) error {
 	return nil
 }
 
-func (db *DB) makeBlob(k, v []byte) []byte {
-	d := make([]byte, len(k)+len(v))
-	// TODO: add checksum
-	copy(d[:len(k)], k)
-	copy(d[len(k):], v)
-	return d
-}
-
 // Del removes the entry with the given key from the kiwi store. Returns
 // errors if the db is read-only or is closed.
 func (db *DB) Del(key []byte) error {
@@ -179,3 +160,11 @@ func (db *DB) String() string {
 }
 
 func (db *DB) isMutable() bool { return db.isReadOnly || !db.isOpen }
+
+func (db *DB) makeBlob(k, v []byte) []byte {
+	d := make([]byte, len(k)+len(v))
+	// TODO: add checksum
+	copy(d[:len(k)], k)
+	copy(d[len(k):], v)
+	return d
+}
