@@ -2,6 +2,7 @@ package bptree
 
 import (
 	"log"
+	"os"
 	"testing"
 	"time"
 
@@ -9,7 +10,7 @@ import (
 )
 
 func TestBPlusTree_Put_Get(t *testing.T) {
-	p, err := io.Open(":memory:", false, 0)
+	p, err := io.Open(":memory:", os.Getpagesize(), false, 0)
 	if err != nil {
 		t.Fatalf("failed to initialize pager: %#v", err)
 	}
@@ -58,7 +59,7 @@ func TestBPlusTree_Put_Get(t *testing.T) {
 }
 
 func BenchmarkBPlusTree_Put_Get(b *testing.B) {
-	p, err := io.Open(":memory:", false, 0)
+	p, err := io.Open(":memory:", os.Getpagesize(), false, 0)
 	if err != nil {
 		b.Fatalf("failed to initialize pager: %#v", err)
 	}

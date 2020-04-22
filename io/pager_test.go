@@ -9,7 +9,7 @@ import (
 func TestPager(t *testing.T) {
 	t.Parallel()
 
-	p, err := Open(InMemoryFileName, false, os.ModePerm)
+	p, err := Open(InMemoryFileName, os.Getpagesize(), false, os.ModePerm)
 	if err != nil {
 		t.Fatalf("Open() unexpected error: %v", err)
 	}

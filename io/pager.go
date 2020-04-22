@@ -22,7 +22,13 @@ var ErrReadOnly = errors.New("read-only")
 
 // Open opens the named file and returns a pager instance for it. If the file
 // doesn't exist, it will be created if not in read-only mode.
-func Open(fileName string, readOnly bool, mode os.FileMode) (*Pager, error) {
+func Open(fileName string, blockSz int, readOnly bool, mode os.FileMode) (*Pager, error) {
+	if blockSz == 0 {
+		blockSz = os.Getpagesize()
+	} else if blockSz < 4096 || blockSz%4096 != 0 {
+		return nil, errors.New("block size must be multple of 4096")
+	}
+
 	if fileName == InMemoryFileName {
 		return newPager(&inMemory{}, os.Getpagesize(), readOnly, 0)
 	}
@@ -39,7 +45,7 @@ func Open(fileName string, readOnly bool, mode os.FileMode) (*Pager, error) {
 		return nil, err
 	}
 
-	return newPager(f, os.Getpagesize(), readOnly, mmapFlag)
+	return newPager(f, blockSz, readOnly, mmapFlag)
 }
 
 // newPager creates an instance of pager for given random access file object.

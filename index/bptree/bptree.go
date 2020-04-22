@@ -490,7 +490,7 @@ func (tree *BPlusTree) init(opts Options) error {
 		flags:    0,
 		size:     0,
 		rootID:   1,
-		pageSz:   uint16(tree.pager.PageSize()),
+		pageSz:   uint32(tree.pager.PageSize()),
 		maxKeySz: uint16(opts.MaxKeySize),
 	}
 	return nil

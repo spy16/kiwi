@@ -17,7 +17,7 @@ func Open(indexFile string, opts *Options) (*LinearHash, error) {
 		opts = &defaultOptions
 	}
 
-	p, err := io.Open(indexFile, opts.ReadOnly, opts.FileMode)
+	p, err := io.Open(indexFile, os.Getpagesize(), opts.ReadOnly, opts.FileMode)
 	if err != nil {
 		return nil, err
 	}
