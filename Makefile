@@ -23,3 +23,9 @@ build:
 	@echo "Building kiwi..."
 	@mkdir -p ./bin
 	@go build -o ./bin/kiwi ./cmd/kiwi/
+
+disktests:
+	@echo "Running on-disk tests..."
+	@go test -count=1 -v -cover -tags=ondisk ./tests/...
+
+.PHONY:	test
