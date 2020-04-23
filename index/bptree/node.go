@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"sort"
 )
 
 const (
@@ -27,8 +26,10 @@ func newNode(id int, pageSz int) *node {
 // node represents an internal or leaf node in the B+ tree.
 type node struct {
 	// configs for read/write
-	dirty  bool
-	pageSz int
+	dirty     bool
+	pageSz    int
+	parent    int
+	parentIdx int
 
 	// node data
 	id       int
@@ -37,59 +38,70 @@ type node struct {
 	children []int
 }
 
-// Search performs a binary search in the node entries for the given key
+// search performs a binary search in the node entries for the given key
 // and returns the index where it should be and a flag indicating whether
 // key exists.
-func (n node) Search(key []byte) (idx int, found bool) {
-	L := len(n.entries)
+func (n node) search(key []byte) (idx int, found bool) {
+	lo, hi := 0, len(n.entries)-1
 
-	idx = sort.Search(L, func(i int) bool {
-		return bytes.Compare(key, n.entries[i].key) != 1
-	})
-	found = (idx < L) && bytes.Equal(n.entries[idx].key, key)
+	var mid int
+	for lo <= hi {
+		mid = (hi + lo) / 2
 
-	return idx, found
+		cmp := bytes.Compare(key, n.entries[mid].key)
+		switch {
+		case cmp == 0:
+			return mid, true
+
+		case cmp > 0:
+			lo = mid + 1
+
+		case cmp < 0:
+			hi = mid - 1
+		}
+	}
+
+	return lo, false
 }
 
-// SplitRight creates a new node to act as right sibling of this node
-// and moves the right half of this node to it. Both nodes will be marked
-// dirty after the split and need to be written to disk.
-func (n *node) SplitRight(rightInto *node) {
+// splitRight splits the node and moves the right half into the node passed
+// as argument. After the split 'n.next' will point to 'right' node.
+func (n *node) splitRight(right *node) {
 	size := len(n.entries)
 
-	if n.IsLeaf() {
+	if n.isLeaf() {
 		at := (size - 1) / 2
-		rightInto.entries = make([]entry, size-at)
-		copy(rightInto.entries, n.entries[at:])
+		right.entries = make([]entry, size-at)
+		copy(right.entries, n.entries[at:])
 		n.entries = n.entries[:at]
 
-		rightInto.next = n.next // right node now points to the next of 'n'
-		n.next = rightInto.id   // left node points to 'right'
+		right.next = n.next // right node now points to the next of 'n'
+		n.next = right.id   // left node points to 'right'
 	} else {
 		at := (size / 2) + 1
 
-		rightInto.entries = append([]entry(nil), n.entries[at:]...)
-		rightInto.children = append([]int(nil), n.children[at:len(n.entries)+1]...)
+		right.entries = append([]entry(nil), n.entries[at:]...)
+		right.children = append([]int(nil), n.children[at:len(n.entries)+1]...)
 
 		n.entries = n.entries[:at-1]
 		n.children = n.children[:at]
 	}
 
 	// both nodes have changed and need to be written to file
-	rightInto.dirty = true
+	right.dirty = true
 	n.dirty = true
 }
 
-// AddChild adds the given child at appropriate location under the node.
-func (n *node) AddChild(key []byte, child *node) {
+// insertChild adds the given child at appropriate location under the node.
+func (n *node) insertChild(key []byte, child *node) {
 	n.dirty = true
-	idx, found := n.Search(key)
+	idx, found := n.search(key)
 	if found {
 		n.children[idx+1] = child.id
 		return
 	}
 
-	n.InsertAt(idx, entry{key: key})
+	n.insertAt(idx, entry{key: key})
 
 	// insert the child node at idx
 	n.children = append(n.children, 0)
@@ -97,30 +109,39 @@ func (n *node) AddChild(key []byte, child *node) {
 	n.children[idx+1] = child.id
 }
 
-// InsertAt inserts the entry at the given index into the node.
-func (n *node) InsertAt(idx int, e entry) {
+// insertAt inserts the entry at the given index into the node.
+func (n *node) insertAt(idx int, e entry) {
 	n.dirty = true
 	n.entries = append(n.entries, entry{})
 	copy(n.entries[idx+1:], n.entries[idx:])
 	n.entries[idx] = e
 }
 
-// SetVal updates the value of the entry with given index.
-func (n *node) SetVal(entryIdx int, val uint64) {
+// removeAt removes the entry at given index and returns the removed
+// entry.
+func (n *node) removeAt(idx int) entry {
+	n.dirty = true
+	e := n.entries[idx]
+	n.entries = append(n.entries[:idx], n.entries[idx+1:]...)
+	return e
+}
+
+// update updates the value of the entry with given index.
+func (n *node) update(entryIdx int, val uint64) {
 	if val != n.entries[entryIdx].val {
 		n.dirty = true
 		n.entries[entryIdx].val = val
 	}
 }
 
-// IsLeaf returns true if this node has no childrent. (i.e., it is
+// isLeaf returns true if this node has no children. (i.e., it is
 // a leaf node.)
-func (n node) IsLeaf() bool { return len(n.children) == 0 }
+func (n node) isLeaf() bool { return len(n.children) == 0 }
 
 func (n node) String() string {
 	s := fmt.Sprintf(
 		"{id=%d, size=%d, leaf=%t, keys=[ ",
-		n.id, len(n.entries), n.IsLeaf(),
+		n.id, len(n.entries), n.isLeaf(),
 	)
 	for _, e := range n.entries {
 		s += fmt.Sprintf("'%s' ", e.key)
@@ -133,7 +154,7 @@ func (n node) MarshalBinary() ([]byte, error) {
 	buf := make([]byte, n.pageSz)
 	offset := 0
 
-	if n.IsLeaf() {
+	if n.isLeaf() {
 		// Note: update leafNodeHeaderSz if this is updated.
 		buf[offset] = flagLeafNode
 		offset++

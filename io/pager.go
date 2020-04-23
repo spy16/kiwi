@@ -23,14 +23,14 @@ var ErrReadOnly = errors.New("read-only")
 // Open opens the named file and returns a pager instance for it. If the file
 // doesn't exist, it will be created if not in read-only mode.
 func Open(fileName string, blockSz int, readOnly bool, mode os.FileMode) (*Pager, error) {
+	if fileName == InMemoryFileName {
+		return newPager(&inMemory{}, blockSz, readOnly, 0)
+	}
+
 	if blockSz == 0 {
 		blockSz = os.Getpagesize()
 	} else if blockSz < 4096 || blockSz%4096 != 0 {
 		return nil, errors.New("block size must be multple of 4096")
-	}
-
-	if fileName == InMemoryFileName {
-		return newPager(&inMemory{}, os.Getpagesize(), readOnly, 0)
 	}
 
 	mmapFlag := mmap.RDWR

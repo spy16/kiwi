@@ -109,11 +109,7 @@ func (tree *BPlusTree) Put(key []byte, val uint64) error {
 		return err
 	}
 
-	e := entry{
-		key: append([]byte(nil), key...),
-		val: val,
-	}
-
+	e := entry{key: append([]byte(nil), key...), val: val}
 	isInsert, err := tree.nodePut(tree.root, e)
 	if err != nil {
 		return err
@@ -150,9 +146,18 @@ func (tree *BPlusTree) Del(key []byte) (uint64, error) {
 		return 0, index.ErrKeyNotFound
 	}
 
-	// TODO: delete the key from the leaf node and rebalance if required
+	val := leaf.entries[idx].val
+	if err := tree.nodeDel(leaf, idx); err != nil {
+		return val, err
+	}
 
-	return leaf.entries[idx].val, errors.New("not implemented")
+	tree.meta.size--
+	tree.meta.dirty = true
+	if err := tree.writeAll(); err != nil {
+		return 0, err
+	}
+
+	return val, nil
 }
 
 // Scan performs an index scan starting at the given key. Each entry will be
@@ -170,35 +175,37 @@ func (tree *BPlusTree) Scan(key []byte, scanFn func(key []byte, v uint64) bool) 
 	}
 
 	var err error
+	var beginAt *node
+
 	if len(key) == 0 {
-		// No explicit key provided by user, find the left-most leaf-key.
-		key, err = tree.leafKey(tree.root)
-		if err != nil {
-			return err
-		}
+		// No explicit key provided by user, find the left-most leaf-node and start
+		// there.
+		beginAt, err = tree.leftLeaf(tree.root)
+	} else {
+		// we have a specific key to start at. find the node containing the key and
+		// start the scan there.
+		beginAt, _, _, err = tree.searchRec(tree.root, key)
 	}
 
-	// find the leaf node with the given key or the leaf node that would
-	// contain the given key if it existed.
-	leaf, _, _, err := tree.searchRec(tree.root, key)
 	if err != nil {
 		return err
 	}
 
 	// starting at found leaf node, follow the 'next' pointer until.
-	for leaf != nil {
-		for i := 0; i < len(leaf.entries); i++ {
-			e := leaf.entries[i]
+	for beginAt != nil {
+		for i := 0; i < len(beginAt.entries); i++ {
+			e := beginAt.entries[i]
 			if scanFn(e.key, e.val) {
 				break
 			}
 		}
 
-		if leaf.next == 0 {
+		if beginAt.next == 0 {
+			// no next pointer. we have reached the right-most leaf node.
 			break
 		}
 
-		leaf, err = tree.fetch(leaf.next)
+		beginAt, err = tree.fetch(beginAt.next)
 		if err != nil {
 			return err
 		}
@@ -226,21 +233,26 @@ func (tree *BPlusTree) Close() error {
 }
 
 func (tree *BPlusTree) String() string {
-	return fmt.Sprintf("BPlusTree{pager=%v, size=%d}", tree.pager, tree.meta.size)
+	s := "BPlusTree{\n"
+	s += fmt.Sprintf("  pager=%v,\n", tree.pager)
+	s += fmt.Sprintf("  size=%d,\n", tree.meta.size)
+	s += fmt.Sprintf("  degree=%d,\n", tree.internalDegree)
+	s += fmt.Sprintf("  leafDegree=%d,\n", tree.leafDegree)
+	s += "}"
+	return s
 }
 
 // nodePut recursively traverses the sub-tree with given root node until
 // leaf node is reached and inserts the entry into it.
 func (tree *BPlusTree) nodePut(n *node, e entry) (bool, error) {
-	idx, found := n.Search(e.key)
+	idx, found := n.search(e.key)
 
-	if n.IsLeaf() {
+	if n.isLeaf() {
 		if found {
-			n.SetVal(idx, e.val)
+			n.update(idx, e.val)
 			return false, nil
 		}
-
-		n.InsertAt(idx, e)
+		n.insertAt(idx, e)
 		return true, tree.splitRootIfNeeded()
 	}
 
@@ -259,9 +271,12 @@ func (tree *BPlusTree) nodePut(n *node, e entry) (bool, error) {
 	}
 
 	if !isInsert {
+		// no inserts, no need check for overflows.
 		return false, nil
 	}
 
+	// if this was an insert and the child is now overflowing,
+	// split the child.
 	if tree.isOverflow(child) {
 		nodes, err := tree.alloc(1)
 		if err != nil {
@@ -269,16 +284,54 @@ func (tree *BPlusTree) nodePut(n *node, e entry) (bool, error) {
 		}
 		right := nodes[0]
 
-		child.SplitRight(right)
+		child.splitRight(right)
 
-		leafKey, err := tree.leafKey(right)
+		leftLeaf, err := tree.leftLeaf(right)
 		if err != nil {
 			return false, err
 		}
-		n.AddChild(leafKey, right)
+		n.insertChild(leftLeaf.entries[0].key, right)
 	}
 
 	return isInsert, tree.splitRootIfNeeded()
+}
+
+// nodeDel removes the entry at given index from the node and re-balances the
+// tree if necessary.
+func (tree *BPlusTree) nodeDel(n *node, i int) error {
+	if n.isLeaf() {
+		delKey := n.removeAt(i).key
+		return tree.reBalance(n, delKey)
+	}
+
+	child, err := tree.fetch(n.children[i])
+	if err != nil {
+		return err
+	}
+
+	// find the largest in the left sub-tree of 'n' (i.e., sub-tree rooted on 'child')
+	leftLargest, err := tree.rightLeaf(child)
+	if err != nil {
+		return err
+	}
+
+	leftLargesEntryIdx := len(leftLargest.entries) - 1
+	n.entries[i] = leftLargest.entries[leftLargesEntryIdx]
+	delKey := leftLargest.entries[leftLargesEntryIdx].key
+	if err := tree.nodeDel(leftLargest, leftLargesEntryIdx); err != nil {
+		return err
+	}
+
+	return tree.reBalance(leftLargest, delKey)
+}
+
+func (tree *BPlusTree) reBalance(n *node, key []byte) error {
+	if !tree.isUnderflow(n) {
+		return nil
+	}
+
+	tree.log("re-balance is needed under node=%d", n.id)
+	return nil
 }
 
 // splitRootIfNeeded splits the root node if it is overflowing and creates
@@ -301,18 +354,25 @@ func (tree *BPlusTree) splitRootIfNeeded() error {
 	newRoot := nodes[0]
 	rightSibling := nodes[1]
 
-	oldRoot.SplitRight(rightSibling)
+	oldRoot.splitRight(rightSibling)
 
-	leafKey, err := tree.leafKey(rightSibling)
+	leftLeaf, err := tree.leftLeaf(rightSibling)
 	if err != nil {
 		return err
 	}
+	leafKey := leftLeaf.entries[0].key
 
 	newRoot.entries = []entry{{key: leafKey}}
 	newRoot.children = []int{oldRoot.id, rightSibling.id}
 
+	// update parent ids and parent indices of nodes
+	oldRoot.parent = newRoot.id
+	oldRoot.parentIdx = 0
+	rightSibling.parent = newRoot.id
+	rightSibling.parentIdx = 1
+
+	// update metadata and instance to reflect the new root
 	tree.root = newRoot
-	tree.nodes[newRoot.id] = newRoot
 	tree.meta.rootID = uint32(newRoot.id)
 	tree.meta.dirty = true
 	return nil
@@ -321,19 +381,26 @@ func (tree *BPlusTree) splitRootIfNeeded() error {
 // isOverflow returns true if the node contains more entries/children
 // than allowed by the degree of the tree.
 func (tree *BPlusTree) isOverflow(n *node) bool {
-	if n.IsLeaf() {
+	if n.isLeaf() {
 		return len(n.entries) > tree.leafDegree-1
 	}
 	return len(n.children) > tree.internalDegree
+}
+
+func (tree *BPlusTree) isUnderflow(n *node) bool {
+	if n.isLeaf() {
+		return len(n.entries) <= (tree.leafDegree/2)-1
+	}
+	return len(n.children) < tree.internalDegree/2
 }
 
 // searchRec searches the sub-tree with root 'n' recursively until the key
 // is  found or the leaf node is  reached. Returns the node last searched,
 // index where the key should be and a flag to indicate if the key exists.
 func (tree *BPlusTree) searchRec(n *node, key []byte) (*node, int, bool, error) {
-	idx, found := n.Search(key)
+	idx, found := n.search(key)
 
-	if n.IsLeaf() {
+	if n.isLeaf() {
 		return n, idx, found, nil
 	}
 
@@ -345,21 +412,41 @@ func (tree *BPlusTree) searchRec(n *node, key []byte) (*node, int, bool, error) 
 	if err != nil {
 		return nil, 0, false, err
 	}
+	child.parent = n.id   // parent id
+	child.parentIdx = idx // index in parent
 
 	return tree.searchRec(child, key)
 }
 
-// leafKey traverses the sub-tree with given node as root until it reaches
-// the left-most leaf node and returns its left-most key.
-func (tree *BPlusTree) leafKey(n *node) ([]byte, error) {
-	if n.IsLeaf() {
-		return n.entries[0].key, nil
+// rightLeaf returns the right most leaf node of the sub-tree with given node
+// as the root.
+func (tree *BPlusTree) rightLeaf(n *node) (*node, error) {
+	if n.isLeaf() {
+		return n, nil
 	}
+
+	lastChildIdx := len(n.children) - 1
+	child, err := tree.fetch(n.children[lastChildIdx])
+	if err != nil {
+		return nil, err
+	}
+
+	return tree.rightLeaf(child)
+}
+
+// leftLeaf returns the left most leaf node of the sub-tree with given node
+// as the root.
+func (tree *BPlusTree) leftLeaf(n *node) (*node, error) {
+	if n.isLeaf() {
+		return n, nil
+	}
+
 	child, err := tree.fetch(n.children[0])
 	if err != nil {
 		return nil, err
 	}
-	return tree.leafKey(child)
+
+	return tree.leftLeaf(child)
 }
 
 // alloc allocates a page for a new node and returns it. underlying file may
@@ -373,9 +460,10 @@ func (tree *BPlusTree) alloc(n int) ([]*node, error) {
 
 	var nodes []*node
 	for i := 0; i < n; i++ {
-		n := newNode(firstID+i, int(tree.meta.pageSz))
+		n := newNode(firstID, int(tree.meta.pageSz))
 		tree.nodes[n.id] = n
 		nodes = append(nodes, n)
+		firstID++
 	}
 	return nodes, nil
 }
@@ -434,8 +522,8 @@ func (tree *BPlusTree) writeAll() error {
 // maximum key size.
 func (tree *BPlusTree) computeDegree(pageSz int) error {
 	// available for node content in leaf/internal nodes
-	leafContentSz := (pageSz - leafNodeHeaderSz)
-	internalContentSz := (pageSz - internalNodeHeaderSz)
+	leafContentSz := pageSz - leafNodeHeaderSz
+	internalContentSz := pageSz - internalNodeHeaderSz
 
 	const valueSz = 8       // for the uint64 value
 	const childPtrSz = 4    // for uint32 child pointer in non-leaf node

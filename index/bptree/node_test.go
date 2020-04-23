@@ -18,19 +18,19 @@ func Test_node_Search(t *testing.T) {
 		},
 	}
 
-	idx, found := n.Search([]byte("D"))
+	idx, found := n.search([]byte("D"))
 	assert(t, found, "expected key to exist")
 	assert(t, idx == 3, "expected index to be 3 not %d", idx)
 
-	idx, found = n.Search([]byte("A"))
+	idx, found = n.search([]byte("A"))
 	assert(t, found, "expected key to exist")
 	assert(t, idx == 0, "expected index to be 0 not %d", idx)
 
-	idx, found = n.Search([]byte("G"))
+	idx, found = n.search([]byte("G"))
 	assert(t, found, "expected key to exist")
 	assert(t, idx == 6, "expected index to be 6 not %d", idx)
 
-	idx, found = n.Search([]byte("X"))
+	idx, found = n.search([]byte("X"))
 	assert(t, !found, "expected key to not exist")
 	assert(t, idx == 7, "expected insertion index to be 7 not %d", idx)
 }
