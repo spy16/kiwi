@@ -15,6 +15,7 @@
 vendor/
 .vscode/
 .idea/
+.DS_Store
 bin/
 expt/
 
