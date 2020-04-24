@@ -27,11 +27,11 @@ func Open(fileName string, blockSz int, readOnly bool, mode os.FileMode) (*Pager
 		return newPager(&inMemory{}, blockSz, readOnly, 0)
 	}
 
-	if blockSz == 0 {
-		blockSz = os.Getpagesize()
-	} else if blockSz < 4096 || blockSz%4096 != 0 {
-		return nil, errors.New("block size must be multple of 4096")
-	}
+	// if blockSz == 0 {
+	// 	blockSz = os.Getpagesize()
+	// } else if blockSz < 4096 || blockSz%4096 != 0 {
+	// 	return nil, errors.New("block size must be multple of 4096")
+	// }
 
 	mmapFlag := mmap.RDWR
 	flag := os.O_CREATE | os.O_RDWR
