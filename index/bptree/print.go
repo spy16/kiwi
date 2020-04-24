@@ -8,10 +8,6 @@ import (
 // Print traverses the entire tree and pretty prints it. This should be
 // used for debugging only.
 func Print(tree *BPlusTree) error {
-	if err := tree.fetchRoot(); err != nil {
-		return nil
-	}
-
 	if len(tree.root.entries) == 0 {
 		fmt.Println("(empty)")
 		return nil

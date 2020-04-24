@@ -9,6 +9,39 @@ import (
 	"github.com/spy16/kiwi/io"
 )
 
+func TestBPlusTree_Put(t *testing.T) {
+	p, err := io.Open(":memory:", 400, false, 0)
+	if err != nil {
+		t.Fatalf("failed to init pager: %v", err)
+	}
+	defer p.Close()
+
+	tree, err := New(p, nil)
+	if err != nil {
+		t.Fatalf("failed to init tree: %v", err)
+	}
+
+	for i := 0; i < 256; i++ {
+		if err := tree.Put([]byte{byte(i)}, uint64(i)); err != nil {
+			t.Fatalf("failed: %v", err)
+		}
+	}
+
+	if tree.Size() != 256 {
+		t.Errorf("expected tree size to be 256, got %d", tree.Size())
+	}
+
+	for i := 0; i < 5; i++ {
+		if err := tree.Put([]byte{byte(65 + i)}, uint64(i)); err != nil {
+			t.Fatalf("failed: %v", err)
+		}
+	}
+
+	if tree.Size() != 256 {
+		t.Errorf("expected tree size to be 256, got %d", tree.Size())
+	}
+}
+
 func TestBPlusTree_Put_Get(t *testing.T) {
 	p, err := io.Open(":memory:", os.Getpagesize(), false, 0)
 	if err != nil {

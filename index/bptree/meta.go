@@ -5,7 +5,11 @@ import (
 	"unsafe"
 )
 
-const metadataSz = int(unsafe.Sizeof(metadata{}))
+const (
+	version = uint8(0x1)
+
+	metadataSz = int(unsafe.Sizeof(metadata{}))
+)
 
 // metadata represents the metadata for the B+ tree stored in a file.
 type metadata struct {

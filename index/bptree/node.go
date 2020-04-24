@@ -26,10 +26,8 @@ func newNode(id int, pageSz int) *node {
 // node represents an internal or leaf node in the B+ tree.
 type node struct {
 	// configs for read/write
-	dirty     bool
-	pageSz    int
-	parent    int
-	parentIdx int
+	dirty  bool
+	pageSz int
 
 	// node data
 	id       int
@@ -65,50 +63,12 @@ func (n node) search(key []byte) (idx int, found bool) {
 	return lo, false
 }
 
-// splitRight splits the node and moves the right half into the node passed
-// as argument. After the split 'n.next' will point to 'right' node.
-func (n *node) splitRight(right *node) {
-	size := len(n.entries)
-
-	if n.isLeaf() {
-		at := (size - 1) / 2
-		right.entries = make([]entry, size-at)
-		copy(right.entries, n.entries[at:])
-		n.entries = n.entries[:at]
-
-		right.next = n.next // right node now points to the next of 'n'
-		right.prev = n.id   // point to previous node 'n'
-		n.next = right.id   // left node points to 'right'
-	} else {
-		at := (size / 2) + 1
-
-		right.entries = append([]entry(nil), n.entries[at:]...)
-		right.children = append([]int(nil), n.children[at:len(n.entries)+1]...)
-
-		n.entries = n.entries[:at-1]
-		n.children = n.children[:at]
-	}
-
-	// both nodes have changed and need to be written to file
-	right.dirty = true
-	n.dirty = true
-}
-
 // insertChild adds the given child at appropriate location under the node.
-func (n *node) insertChild(key []byte, child *node) {
+func (n *node) insertChild(idx int, child *node) {
 	n.dirty = true
-	idx, found := n.search(key)
-	if found {
-		n.children[idx+1] = child.id
-		return
-	}
-
-	n.insertAt(idx, entry{key: key})
-
-	// insert the child node at idx
 	n.children = append(n.children, 0)
-	copy(n.children[idx+2:], n.children[idx+1:])
-	n.children[idx+1] = child.id
+	copy(n.children[idx+1:], n.children[idx:])
+	n.children[idx] = child.id
 }
 
 // insertAt inserts the entry at the given index into the node.
@@ -117,15 +77,6 @@ func (n *node) insertAt(idx int, e entry) {
 	n.entries = append(n.entries, entry{})
 	copy(n.entries[idx+1:], n.entries[idx:])
 	n.entries[idx] = e
-}
-
-// removeAt removes the entry at given index and returns the removed
-// entry.
-func (n *node) removeAt(idx int) entry {
-	n.dirty = true
-	e := n.entries[idx]
-	n.entries = append(n.entries[:idx], n.entries[idx+1:]...)
-	return e
 }
 
 // update updates the value of the entry with given index.
@@ -141,14 +92,16 @@ func (n *node) update(entryIdx int, val uint64) {
 func (n node) isLeaf() bool { return len(n.children) == 0 }
 
 func (n node) String() string {
-	s := fmt.Sprintf(
-		"{id=%d, size=%d, leaf=%t, keys=[ ",
-		n.id, len(n.entries), n.isLeaf(),
-	)
+	s := "{"
 	for _, e := range n.entries {
 		s += fmt.Sprintf("'%s' ", e.key)
 	}
-	s += fmt.Sprintf("], next=%d}", n.next)
+	s += "} "
+	s += fmt.Sprintf(
+		"[id=%d, size=%d, leaf=%t, %d<-n->%d]",
+		n.id, len(n.entries), n.isLeaf(), n.prev, n.next,
+	)
+
 	return s
 }
 

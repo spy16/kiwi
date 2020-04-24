@@ -10,9 +10,13 @@ var (
 	// lookup key is not found in index/store.
 	ErrKeyNotFound = errors.New("key not found")
 
+	// ErrKeyTooLarge is returned by index implementations when a key is
+	// larger than a configured limit if any.
+	ErrKeyTooLarge = errors.New("key is too large")
+
 	// ErrEmptyKey should be returned by backends when an operation is
 	// requested with an empty key.
-	ErrEmptyKey = errors.New("invalid sized key")
+	ErrEmptyKey = errors.New("empty key")
 
 	// ErrImmutable should be returned by backends when write operation
 	// (put/del) is attempted on a readonly.
