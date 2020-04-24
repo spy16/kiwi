@@ -166,7 +166,7 @@ func (tree *BPlusTree) Del(key []byte) (uint64, error) {
 // Scan continues until the right most leaf node is reached or the scanFn
 // returns 'true' indicating to stop the scan.
 // TODO: all nodes are cached in-memory during scan which might not be good.
-func (tree *BPlusTree) Scan(key []byte, scanFn func(key []byte, v uint64) bool) error {
+func (tree *BPlusTree) Scan(key []byte, reverse bool, scanFn func(key []byte, v uint64) bool) error {
 	tree.mu.RLock()
 	defer tree.mu.RUnlock()
 
@@ -178,12 +178,16 @@ func (tree *BPlusTree) Scan(key []byte, scanFn func(key []byte, v uint64) bool) 
 	var beginAt *node
 
 	if len(key) == 0 {
-		// No explicit key provided by user, find the left-most leaf-node and start
-		// there.
-		beginAt, err = tree.leftLeaf(tree.root)
+		// No explicit key provided by user, find the a leaf-node based on
+		// scan direction and start there.
+		if !reverse {
+			beginAt, err = tree.leftLeaf(tree.root)
+		} else {
+			beginAt, err = tree.rightLeaf(tree.root)
+		}
 	} else {
-		// we have a specific key to start at. find the node containing the key and
-		// start the scan there.
+		// we have a specific key to start at. find the node containing the
+		// key and start the scan there.
 		beginAt, _, _, err = tree.searchRec(tree.root, key)
 	}
 
@@ -200,12 +204,17 @@ func (tree *BPlusTree) Scan(key []byte, scanFn func(key []byte, v uint64) bool) 
 			}
 		}
 
-		if beginAt.next == 0 {
-			// no next pointer. we have reached the right-most leaf node.
+		if (!reverse && beginAt.next == 0) || (reverse && beginAt.prev == 0) {
+			// no pointer in the direction we want to proceed.
 			break
 		}
 
-		beginAt, err = tree.fetch(beginAt.next)
+		goTo := beginAt.next
+		if reverse {
+			goTo = beginAt.prev
+		}
+
+		beginAt, err = tree.fetch(goTo)
 		if err != nil {
 			return err
 		}
@@ -529,11 +538,10 @@ func (tree *BPlusTree) computeDegree(pageSz int) error {
 	const childPtrSz = 4    // for uint32 child pointer in non-leaf node
 	const keySizeSpecSz = 2 // for storing the actual key size
 
-	leafEntrySize := int(valueSz + 2 + tree.meta.maxKeySz)                    // 8 bytes for the uint64 value
-	internalEntrySize := int(childPtrSz + keySizeSpecSz + tree.meta.maxKeySz) // 4 bytes for the uint32 child pointer
+	leafEntrySize := int(valueSz + 2 + tree.meta.maxKeySz)
+	internalEntrySize := int(childPtrSz + keySizeSpecSz + tree.meta.maxKeySz)
 
 	tree.leafDegree = leafContentSz / leafEntrySize
-
 	// 4 bytes extra for the one extra child pointer
 	tree.internalDegree = (internalContentSz - 4) / internalEntrySize
 
@@ -543,6 +551,8 @@ func (tree *BPlusTree) computeDegree(pageSz int) error {
 	return nil
 }
 
+// open opens the B+ tree stored on disk using the pager. If the pager
+// has no pages, a new B+ tree will be initialized.
 func (tree *BPlusTree) open(opts Options) error {
 	if tree.pager.Count() == 0 {
 		return tree.init(opts)
@@ -562,8 +572,11 @@ func (tree *BPlusTree) open(opts Options) error {
 
 }
 
+// init initializes a new B+ tree in the underlying file. allocates
+// 2 pages (1 for meta + 1 for root) and initializes the instance.
+// metadata and the root node are expected to be written to file
+// during insertion.
 func (tree *BPlusTree) init(opts Options) error {
-	// allocate 2 pages (1 for meta + 1 for root)
 	_, err := tree.pager.Alloc(2)
 	if err != nil {
 		return err

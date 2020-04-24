@@ -44,6 +44,7 @@ func Test_node_Leaf_Binary(t *testing.T) {
 			{key: []byte("world"), val: 100},
 		},
 		next: 13,
+		prev: 10,
 	}
 
 	d, err := original.MarshalBinary()

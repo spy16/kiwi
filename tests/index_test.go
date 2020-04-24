@@ -53,7 +53,7 @@ func readALot(index index.Index, count uint32) (time.Duration, error) {
 
 func scanALot(scanner index.Scanner, count uint32) (time.Duration, error) {
 	start := time.Now()
-	err := scanner.Scan(nil, func(key []byte, v uint64) bool {
+	err := scanner.Scan(nil, false, func(key []byte, v uint64) bool {
 		return false
 	})
 	return time.Since(start), err

@@ -37,7 +37,7 @@ type Index interface {
 // scans.
 type IndexScanner interface {
 	Index
-	Scan(beginKey []byte, scanFn func(key []byte, v uint64) bool) error
+	Scan(beginKey []byte, reverse bool, scanFn func(key []byte, v uint64) bool) error
 }
 
 // BlobStore represents a storage for arbitrary blobs of binary data.

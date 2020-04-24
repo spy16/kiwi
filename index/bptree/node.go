@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	leafNodeHeaderSz     = 6
+	leafNodeHeaderSz     = 11
 	internalNodeHeaderSz = 3
 
 	flagLeafNode     = uint8(0x0)
@@ -34,6 +34,7 @@ type node struct {
 	// node data
 	id       int
 	next     int
+	prev     int
 	entries  []entry
 	children []int
 }
@@ -76,6 +77,7 @@ func (n *node) splitRight(right *node) {
 		n.entries = n.entries[:at]
 
 		right.next = n.next // right node now points to the next of 'n'
+		right.prev = n.id   // point to previous node 'n'
 		n.next = right.id   // left node points to 'right'
 	} else {
 		at := (size / 2) + 1
@@ -165,6 +167,9 @@ func (n node) MarshalBinary() ([]byte, error) {
 		bin.PutUint32(buf[offset:offset+4], uint32(n.next))
 		offset += 4
 
+		bin.PutUint32(buf[offset:offset+4], uint32(n.prev))
+		offset += 4
+
 		for i := 0; i < len(n.entries); i++ {
 			e := n.entries[i]
 
@@ -219,7 +224,10 @@ func (n *node) UnmarshalBinary(d []byte) error {
 		offset += 2
 
 		n.next = int(bin.Uint32(d[offset : offset+4]))
-		offset += 4 // we are now at offset 7
+		offset += 4
+
+		n.prev = int(bin.Uint32(d[offset : offset+4]))
+		offset += 4
 
 		for i := 0; i < entryCount; i++ {
 			e := entry{}

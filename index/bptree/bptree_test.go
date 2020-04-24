@@ -118,7 +118,7 @@ func readCheck(t *testing.T, tree *BPlusTree, count int) {
 func scanLot(t *testing.T, tree *BPlusTree, count int) {
 	start := time.Now()
 	scanned := uint64(0)
-	_ = tree.Scan(nil, func(key []byte, v uint64) bool {
+	_ = tree.Scan(nil, false, func(key []byte, v uint64) bool {
 		if v != scanned {
 			t.Fatalf("bad scan for '%x': %d != %d", key, v, scanned)
 		}
