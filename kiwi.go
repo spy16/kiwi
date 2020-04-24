@@ -9,8 +9,8 @@ import (
 	"github.com/spy16/kiwi/index/bptree"
 )
 
-var _ Index = (*bptree.BPlusTree)(nil)
-var _ IndexScanner = (*bptree.BPlusTree)(nil)
+var _ index.Index = (*bptree.BPlusTree)(nil)
+var _ index.Scanner = (*bptree.BPlusTree)(nil)
 
 // Open opens a Kiwi database.
 func Open(filePath string, opts *Options) (*DB, error) {
@@ -23,21 +23,6 @@ func Open(filePath string, opts *Options) (*DB, error) {
 	}
 
 	return nil, nil
-}
-
-// Index represents the indexing scheme to be used by Kiwi database
-// instance.
-type Index interface {
-	Get(key []byte) (uint64, error)
-	Del(key []byte) (uint64, error)
-	Put(key []byte, v uint64) error
-}
-
-// IndexScanner represents indexing schemes with support for prefix
-// scans.
-type IndexScanner interface {
-	Index
-	Scan(beginKey []byte, reverse bool, scanFn func(key []byte, v uint64) bool) error
 }
 
 // BlobStore represents a storage for arbitrary blobs of binary data.
@@ -66,7 +51,7 @@ type DB struct {
 
 	// internal state
 	mu     *sync.RWMutex
-	index  Index
+	index  index.Index
 	blobs  BlobStore
 	isOpen bool
 }

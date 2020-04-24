@@ -1,25 +1,67 @@
 package bptree
 
 import (
+	"hash/fnv"
 	"log"
-	"os"
+	"math/rand"
 	"testing"
 	"time"
-
-	"github.com/spy16/kiwi/io"
 )
 
-func TestBPlusTree_Put(t *testing.T) {
-	p, err := io.Open(":memory:", 400, false, 0)
-	if err != nil {
-		t.Fatalf("failed to init pager: %v", err)
-	}
-	defer p.Close()
+const (
+	letterBytes = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-	tree, err := New(p, nil)
+	letterIdxBits = 6                    // 6 bits to represent a letter index
+	letterIdxMask = 1<<letterIdxBits - 1 // All 1-bits, as many as letterIdxBits
+	letterIdxMax  = 63 / letterIdxBits   // # of letter indices fitting in 63 bits
+)
+
+var src = rand.NewSource(time.Now().UnixNano())
+
+func TestBPlusTree_Random(t *testing.T) {
+	start := time.Now()
+	count := uint32(10000)
+
+	idx, err := Open(":memory:", nil)
+	if err != nil {
+		t.Fatalf("failed to init B+ tree: %v", err)
+	}
+	defer idx.Close()
+
+	for i := uint32(0); i < count; i++ {
+		key := randKey(4)
+		val := hash(key)
+
+		if err := idx.Put(key, val); err != nil {
+			t.Fatalf("Put() unexpected error: %v", err)
+		}
+	}
+	t.Logf("finished %d Put() in %s", count, time.Since(start))
+
+	start = time.Now()
+	c := uint32(0)
+	_ = idx.Scan(nil, false, func(key []byte, v uint64) bool {
+		c++
+		expectedV := hash(key)
+
+		if v != expectedV {
+			t.Fatalf(
+				"Scan() value check failed for key '%s': read value %d != expected %d",
+				key, v, expectedV,
+			)
+		}
+		return false
+	})
+
+	t.Logf("finished Scan() for %d keys in %s", c, time.Since(start))
+}
+
+func TestBPlusTree_Put(t *testing.T) {
+	tree, err := Open(":memory:", nil)
 	if err != nil {
 		t.Fatalf("failed to init tree: %v", err)
 	}
+	defer tree.Close()
 
 	for i := 0; i < 256; i++ {
 		if err := tree.Put([]byte{byte(i)}, uint64(i)); err != nil {
@@ -43,12 +85,7 @@ func TestBPlusTree_Put(t *testing.T) {
 }
 
 func TestBPlusTree_Put_Get(t *testing.T) {
-	p, err := io.Open(":memory:", os.Getpagesize(), false, 0)
-	if err != nil {
-		t.Fatalf("failed to initialize pager: %#v", err)
-	}
-
-	tree, err := New(p, nil)
+	tree, err := Open(":memory:", nil)
 	if err != nil {
 		t.Fatalf("failed to create in-memory tree: %#v", err)
 	}
@@ -87,17 +124,10 @@ func TestBPlusTree_Put_Get(t *testing.T) {
 			t.Errorf("expected value of key 'hello' to be 120012, not %d", v)
 		}
 	})
-
-	t.Logf("I/O Stats: %s", p.Stats())
 }
 
 func BenchmarkBPlusTree_Put_Get(b *testing.B) {
-	p, err := io.Open(":memory:", os.Getpagesize(), false, 0)
-	if err != nil {
-		b.Fatalf("failed to initialize pager: %#v", err)
-	}
-
-	tree, err := New(p, nil)
+	tree, err := Open(":memory:", nil)
 	if err != nil {
 		log.Fatalf("failed to init tree: %#v", err)
 	}
@@ -179,4 +209,28 @@ func writeLot(t *testing.T, tree *BPlusTree, count int) {
 		}
 	}
 	t.Logf("inserted %d (expected=%d) keys in %s", tree.Size(), count, time.Since(start))
+}
+
+func randKey(n int) []byte {
+	b := make([]byte, n)
+	// A src.Int63() generates 63 random bits, enough for letterIdxMax characters!
+	for i, cache, remain := n-1, src.Int63(), letterIdxMax; i >= 0; {
+		if remain == 0 {
+			cache, remain = src.Int63(), letterIdxMax
+		}
+		if idx := int(cache & letterIdxMask); idx < len(letterBytes) {
+			b[i] = letterBytes[idx]
+			i--
+		}
+		cache >>= letterIdxBits
+		remain--
+	}
+
+	return b
+}
+
+func hash(k []byte) uint64 {
+	h := fnv.New64()
+	h.Write(k)
+	return h.Sum64()
 }

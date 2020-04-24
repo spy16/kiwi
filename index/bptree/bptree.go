@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/spy16/kiwi/index"
+	"github.com/spy16/kiwi/io"
 )
 
 var (
@@ -17,20 +18,30 @@ var (
 
 	// defaultOptions to be used by New().
 	defaultOptions = Options{
+		ReadOnly:   false,
+		FileMode:   0644,
+		PageSize:   os.Getpagesize(),
 		MaxKeySize: 100,
 	}
 )
 
-// New initializes a new instance of B+ tree using the given pager. Degree of
-// the tree is computed based on maxKeySize and pageSize used by the pager. If
-// nil options are provided, defaultOptions will be used.
-func New(p Pager, opts *Options) (*BPlusTree, error) {
+// Open opens the named file as a B+ tree index file and returns an instance
+// B+ tree for use. Use ":memory:" for an in-memory B+ tree instance for quick
+// testing setup. Degree of the tree is computed based on maxKeySize and pageSize
+// used by the pager. If nil options are provided, defaultOptions will be used.
+func Open(fileName string, opts *Options) (*BPlusTree, error) {
 	if opts == nil {
 		opts = &defaultOptions
 	}
 
+	p, err := io.Open(fileName, opts.PageSize, opts.ReadOnly, opts.FileMode)
+	if err != nil {
+		return nil, err
+	}
+
 	tree := &BPlusTree{
 		mu:    &sync.RWMutex{},
+		file:  fileName,
 		pager: p,
 		root:  nil,
 		nodes: map[int]*node{},
@@ -56,12 +67,13 @@ func New(p Pager, opts *Options) (*BPlusTree, error) {
 // to a single page in the file. Degree of the tree is decided based on the
 // page size and max key size while initializing.
 type BPlusTree struct {
+	file       string
 	degree     int
 	leafDegree int
 
 	// tree state
 	mu    *sync.RWMutex
-	pager Pager
+	pager *io.Pager
 	nodes map[int]*node
 	meta  metadata
 	root  *node
@@ -223,29 +235,31 @@ func (tree *BPlusTree) Close() error {
 }
 
 func (tree *BPlusTree) String() string {
-	s := "BPlusTree{\n"
-	s += fmt.Sprintf("  pager=%v,\n", tree.pager)
-	s += fmt.Sprintf("  size=%d,\n", tree.meta.size)
-	s += fmt.Sprintf("  degree=%d,\n", tree.degree)
-	s += fmt.Sprintf("  leafDegree=%d,\n", tree.leafDegree)
-	s += "}"
-	return s
+	return fmt.Sprintf(
+		"BPlusTree{file='%s', size=%d, degree=(%d, %d)}",
+		tree.file, tree.Size(), tree.degree, tree.leafDegree,
+	)
 }
 
 func (tree *BPlusTree) put(e entry) (bool, error) {
 	if tree.isFull(tree.root) {
-		oldRoot := tree.root
-		newRoot, err := tree.allocOne()
+		// we will need 2 extra nodes for splitting the root
+		// (1 to act as new root + 1 for the right sibling)
+		nodes, err := tree.alloc(2)
 		if err != nil {
 			return false, err
 		}
-		newRoot.children = append(newRoot.children, oldRoot.id)
+
+		newRoot := nodes[0]
+		rightSibling := nodes[1]
+		oldRoot := tree.root
 
 		// update the tree root
+		newRoot.children = append(newRoot.children, oldRoot.id)
 		tree.root = newRoot
 		tree.meta.rootID = uint32(newRoot.id)
 
-		if err := tree.split(newRoot, oldRoot, 0); err != nil {
+		if err := tree.split(newRoot, oldRoot, rightSibling, 0); err != nil {
 			return false, err
 		}
 	}
@@ -254,9 +268,9 @@ func (tree *BPlusTree) put(e entry) (bool, error) {
 }
 
 func (tree *BPlusTree) insertNonFull(n *node, e entry) (bool, error) {
-	idx, found := n.search(e.key)
-
 	if len(n.children) == 0 {
+		idx, found := n.search(e.key)
+
 		if found {
 			n.update(idx, e.val)
 			return false, nil
@@ -266,8 +280,12 @@ func (tree *BPlusTree) insertNonFull(n *node, e entry) (bool, error) {
 		return true, nil
 	}
 
+	return tree.insertInternal(n, e)
+}
+
+func (tree *BPlusTree) insertInternal(n *node, e entry) (bool, error) {
+	idx, found := n.search(e.key)
 	if found {
-		// if found, value should be under the right child.
 		idx++
 	}
 
@@ -277,7 +295,12 @@ func (tree *BPlusTree) insertNonFull(n *node, e entry) (bool, error) {
 	}
 
 	if tree.isFull(child) {
-		if err := tree.split(n, child, idx); err != nil {
+		sibling, err := tree.allocOne()
+		if err != nil {
+			return false, err
+		}
+
+		if err := tree.split(n, child, sibling, idx); err != nil {
 			return false, err
 		}
 
@@ -293,14 +316,10 @@ func (tree *BPlusTree) insertNonFull(n *node, e entry) (bool, error) {
 	return tree.insertNonFull(child, e)
 }
 
-func (tree *BPlusTree) split(p, n *node, i int) error {
-	sibling, err := tree.allocOne()
-	if err != nil {
-		return err
-	}
-
+func (tree *BPlusTree) split(p, n, sibling *node, i int) error {
 	p.dirty = true
 	n.dirty = true
+	sibling.dirty = true
 
 	if len(n.children) == 0 {
 		// split leaf node. use 'sibling' as the right node for 'n'.
@@ -314,22 +333,22 @@ func (tree *BPlusTree) split(p, n *node, i int) error {
 
 		p.insertChild(i+1, sibling)
 		p.insertAt(i, sibling.entries[0])
-		return nil
+	} else {
+		// split internal node. use 'sibling' as left node for 'n'.
+		parentKey := n.entries[tree.degree-1]
+
+		sibling.entries = make([]entry, tree.degree-1)
+		copy(sibling.entries, n.entries[:tree.degree])
+		n.entries = n.entries[tree.degree:]
+
+		sibling.children = make([]int, tree.degree)
+		copy(sibling.children, n.children[:tree.degree])
+		n.children = n.children[tree.degree:]
+
+		p.insertChild(i, sibling)
+		p.insertAt(i, parentKey)
 	}
 
-	// split internal node. use 'sibling' as left node for 'n'.
-	parentKey := n.entries[tree.degree-1]
-
-	sibling.entries = make([]entry, tree.degree-1)
-	copy(sibling.entries, n.entries[:tree.degree])
-	n.entries = n.entries[tree.degree:]
-
-	sibling.children = make([]int, tree.degree)
-	copy(sibling.children, n.children[:tree.degree])
-	n.children = n.children[tree.degree:]
-
-	p.insertChild(i, sibling)
-	p.insertAt(i, parentKey)
 	return nil
 }
 
@@ -421,6 +440,23 @@ func (tree *BPlusTree) allocOne() (*node, error) {
 	tree.nodes[pid] = n
 
 	return n, nil
+}
+
+func (tree *BPlusTree) alloc(n int) ([]*node, error) {
+	pid, err := tree.pager.Alloc(n)
+	if err != nil {
+		return nil, err
+	}
+
+	nodes := make([]*node, n)
+	for i := 0; i < n; i++ {
+		n := newNode(pid, int(tree.meta.pageSz))
+		tree.nodes[pid] = n
+		nodes[i] = n
+		pid++
+	}
+
+	return nodes, nil
 }
 
 // open opens the B+ tree stored on disk using the pager. If the pager
@@ -528,8 +564,8 @@ func (tree *BPlusTree) computeDegree(pageSz int) error {
 	internalEntrySize := int(childPtrSz + keySizeSpecSz + tree.meta.maxKeySz)
 
 	// 4 bytes extra for the one extra child pointer
-	tree.degree = (internalContentSz - 4) / internalEntrySize
-	tree.leafDegree = leafContentSz / leafEntrySize
+	tree.degree = (internalContentSz - 4) / (2 * internalEntrySize)
+	tree.leafDegree = leafContentSz / (2 * leafEntrySize)
 
 	if tree.leafDegree <= 2 || tree.degree <= 2 {
 		return errors.New("invalid degree, reduce key size or increase page size")
@@ -539,5 +575,8 @@ func (tree *BPlusTree) computeDegree(pageSz int) error {
 
 // Options represents the configuration options for the B+ tree index.
 type Options struct {
+	ReadOnly   bool
+	FileMode   os.FileMode
+	PageSize   int
 	MaxKeySize int
 }

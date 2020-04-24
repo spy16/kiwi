@@ -6,32 +6,18 @@
 package index_test
 
 import (
+	"encoding/binary"
 	"log"
-	"os"
 	"time"
-	"unsafe"
 
 	"github.com/spy16/kiwi/index"
-	"github.com/spy16/kiwi/io"
 )
-
-func createPager(name string) (*io.Pager, func(), error) {
-	p, err := io.Open(name, os.Getpagesize(), false, os.ModePerm)
-	if err != nil {
-		return nil, nil, err
-	}
-	cleanup := func() {
-		_ = p.Close()
-		_ = os.Remove(name)
-	}
-
-	return p, cleanup, nil
-}
 
 func writeALot(index index.Index, count uint32) (time.Duration, error) {
 	start := time.Now()
 	for i := uint32(0); i < count; i++ {
-		_ = index.Put((*(*[4]byte)(unsafe.Pointer(&i)))[:], uint64(i))
+		key, val := genKV(i)
+		_ = index.Put(key, val)
 	}
 	return time.Since(start), nil
 }
@@ -39,12 +25,17 @@ func writeALot(index index.Index, count uint32) (time.Duration, error) {
 func readALot(index index.Index, count uint32) (time.Duration, error) {
 	start := time.Now()
 	for i := uint32(0); i < count; i++ {
-		key := (*(*[4]byte)(unsafe.Pointer(&i)))
-		v, _ := index.Get(key[:])
-		if v != uint64(i) {
+		key, val := genKV(i)
+
+		v, err := index.Get(key)
+		if err != nil {
+			log.Fatalf("Get('%x') -> %v [i=%d]", key, err, i)
+		}
+
+		if v != val {
 			log.Fatalf(
 				"bad read for key='%x' : actual %d != expected %d",
-				key, v, uint64(i),
+				key, v, val,
 			)
 		}
 	}
@@ -53,8 +44,28 @@ func readALot(index index.Index, count uint32) (time.Duration, error) {
 
 func scanALot(scanner index.Scanner, count uint32) (time.Duration, error) {
 	start := time.Now()
-	err := scanner.Scan(nil, false, func(key []byte, v uint64) bool {
+
+	c := 0
+	err := scanner.Scan(nil, false, func(key []byte, actual uint64) bool {
+		_, v := genKV(uint32(c))
+		c++
+
+		if v != actual {
+			log.Fatalf("value of key '%x' expected to be %d but was %d",
+				key, v, actual)
+		}
 		return false
 	})
+
+	if c != int(count) {
+		log.Fatalf("expected scan to process %d keys, but did only %d", count, c)
+	}
+
 	return time.Since(start), err
+}
+
+func genKV(i uint32) ([]byte, uint64) {
+	var b [4]byte
+	binary.BigEndian.PutUint32(b[:], i)
+	return b[:], uint64(i)
 }
