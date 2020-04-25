@@ -15,14 +15,6 @@ import (
 var (
 	// bin is the byte order used for all marshals/unmarshals.
 	bin = binary.LittleEndian
-
-	// defaultOptions to be used by New().
-	defaultOptions = Options{
-		ReadOnly:   false,
-		FileMode:   0644,
-		PageSize:   os.Getpagesize(),
-		MaxKeySize: 100,
-	}
 )
 
 // Open opens the named file as a B+ tree index file and returns an instance
@@ -74,9 +66,9 @@ type BPlusTree struct {
 	// tree state
 	mu    *sync.RWMutex
 	pager *io.Pager
-	nodes map[int]*node
-	meta  metadata
-	root  *node
+	nodes map[int]*node // node cache to avoid IO
+	meta  metadata      // metadata about tree structure
+	root  *node         // current root node
 }
 
 // Get fetches the value associated with the given key. Returns error if key
@@ -412,6 +404,8 @@ func (tree *BPlusTree) isFull(n *node) bool {
 	return len(n.entries) == ((2 * tree.degree) - 1)
 }
 
+// fetch returns the node with given id. underlying file is accessed
+// only if the node doesn't exist in cache.
 func (tree *BPlusTree) fetch(id int) (*node, error) {
 	n, found := tree.nodes[id]
 	if found {
@@ -431,25 +425,39 @@ func (tree *BPlusTree) fetch(id int) (*node, error) {
 // allocOne allocates a page in the underlying pager and creates a node
 // on that page. node is not written to the page in this call.
 func (tree *BPlusTree) allocOne() (*node, error) {
-	pid, err := tree.pager.Alloc(1)
+	nodes, err := tree.alloc(1)
 	if err != nil {
 		return nil, err
 	}
-
-	n := newNode(pid, int(tree.meta.pageSz))
-	tree.nodes[pid] = n
-
-	return n, nil
+	return nodes[0], nil
 }
 
+// alloc allocates pages required for 'n' new nodes. alloc will reuse
+// pages from free-list if available.
 func (tree *BPlusTree) alloc(n int) ([]*node, error) {
-	pid, err := tree.pager.Alloc(n)
-	if err != nil {
-		return nil, err
+	// check if there are enough free pages from the freelist
+	// and try to allocate sequential set of pages.
+	allocated, free := allocateFree(tree.meta.freeList, n)
+	tree.meta.freeList = free
+
+	// free list could be having less pages than we actually need.
+	// we need to allocate if that is the case.
+	if len(allocated) < n {
+		rem := n - len(allocated)
+		pid, err := tree.pager.Alloc(rem)
+		if err != nil {
+			return nil, err
+		}
+
+		for i := 0; i < rem; i++ {
+			allocated = append(allocated, pid)
+			pid++
+		}
 	}
 
 	nodes := make([]*node, n)
 	for i := 0; i < n; i++ {
+		pid := allocated[i]
 		n := newNode(pid, int(tree.meta.pageSz))
 		tree.nodes[pid] = n
 		nodes[i] = n
@@ -493,7 +501,7 @@ func (tree *BPlusTree) open(opts Options) error {
 // (1 for meta + 1 for root) and initializes the instance. metadata and the
 // root node are expected to be written to file during insertion.
 func (tree *BPlusTree) init(opts Options) error {
-	_, err := tree.pager.Alloc(2)
+	_, err := tree.pager.Alloc(2 + opts.PreAlloc)
 	if err != nil {
 		return err
 	}
@@ -510,6 +518,12 @@ func (tree *BPlusTree) init(opts Options) error {
 		pageSz:   uint32(tree.pager.PageSize()),
 		maxKeySz: uint16(opts.MaxKeySize),
 	}
+
+	tree.meta.freeList = make([]int, opts.PreAlloc)
+	for i := 0; i < opts.PreAlloc; i++ {
+		tree.meta.freeList[i] = i + 2 // +2 since first 2 pages reserved
+	}
+
 	return nil
 }
 
@@ -537,6 +551,7 @@ func (tree *BPlusTree) writeMeta() error {
 		tree.meta.dirty = false
 		return err
 	}
+
 	return nil
 }
 
@@ -573,10 +588,27 @@ func (tree *BPlusTree) computeDegree(pageSz int) error {
 	return nil
 }
 
-// Options represents the configuration options for the B+ tree index.
-type Options struct {
-	ReadOnly   bool
-	FileMode   os.FileMode
-	PageSize   int
-	MaxKeySize int
+func allocateFree(arr []int, n int) (alloc, free []int) {
+	if len(arr) <= n {
+		return arr, nil
+	} else if n == 1 {
+		return []int{arr[0]}, arr[1:]
+	}
+
+	i, j := 0, 0
+	for ; i < len(arr); i++ {
+		j = i + (n - 1)
+		if j < len(arr) && arr[j] == arr[i]+(n-1) {
+			break
+		}
+	}
+
+	if i >= len(arr) || j >= len(arr) {
+		i, j = 0, n-1
+	}
+
+	res := make([]int, n)
+	copy(res, arr[i:j+1])
+	arr = append(arr[:i], arr[j+1:]...)
+	return res, arr
 }

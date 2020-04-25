@@ -20,6 +20,7 @@ func TestBPlusTree(t *testing.T) {
 		FileMode:   0664,
 		MaxKeySize: 4,
 		PageSize:   os.Getpagesize(),
+		PreAlloc:   100,
 	})
 	if err != nil {
 		t.Fatalf("failed to init B+ tree: %v", err)

@@ -14,7 +14,27 @@ key size. Degree might vary slightly between internal nodes and leaf nodes since
 nodes store only keys and pointers to child nodes whereas leaf nodes store key, value and
 pointers to right and left siblings for range scans.
 
+First page is reserved for metadata about the tree which includes the page size used to
+initialize, maximum key size, free list etc.
+
 ### Page Layouts
+
+* Meta page:
+
+    ```plaintext
+    --- header section ---
+    magic   (2 bytes) - a constant magic marker
+    version (1 byte) - version of the implementation
+    flags   (1 byte) - control flags if any (unused)
+    keySz   (2 byte) - max key size allowed (i.e., upto 2^16-1)
+    pageSz  (4 byte) - page size used to init index
+    size    (4 byte) - number of entries in the tree
+    rootID  (4 byte) - pointer to the root node
+    freeSz  (4 byte) - size of the free list (allocated but unused page ids)
+    ---- header ends -----
+    freeId1 (4 byte) - pointer to a free page
+    ...
+    ```
 
 * Leaf Node:
 
