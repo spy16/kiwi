@@ -1,3 +1,6 @@
+// Package bptree implements an on-disk B+ tree indexing scheme that can store
+// key-value pairs and provide fast lookups and range scans. keys can be blobs
+// binary data and value is uint64.
 package bptree
 
 import (
@@ -12,10 +15,8 @@ import (
 	"github.com/spy16/kiwi/io"
 )
 
-var (
-	// bin is the byte order used for all marshals/unmarshals.
-	bin = binary.LittleEndian
-)
+// bin is the byte order used for all marshals/unmarshals.
+var bin = binary.LittleEndian
 
 // Open opens the named file as a B+ tree index file and returns an instance
 // B+ tree for use. Use ":memory:" for an in-memory B+ tree instance for quick

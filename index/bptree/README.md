@@ -8,11 +8,12 @@ in a data-file.
 
 ## Implementation
 
-Each node in the tree is mapped to exactly one page/block (size configurable as multiple
+Each node in the tree is mapped to exactly one page or block (block size must be multiple
 of 4096) in the underlying file. Degree of the tree is computed based on the page size and
 key size. Degree might vary slightly between internal nodes and leaf nodes since internal
 nodes store only keys and pointers to child nodes whereas leaf nodes store key, value and
-pointers to right and left siblings for range scans.
+pointers to right and left siblings for range scans. But the B+ tree invariants will be
+ensured.
 
 First page is reserved for metadata about the tree which includes the page size used to
 initialize, maximum key size, free list etc.
@@ -69,3 +70,24 @@ initialize, maximum key size, free list etc.
     key2   (variable) - key 2 itself
     ...
     ```
+
+## Limitations
+
+1. Key size is bounded by the configured max key size which itself is bounded by page size
+   since these 2 together calculate the branching factor (or degree) of the tree and increasing
+   the key size reduces the degree.
+2. There is no compaction implemented for the index file after too many deletions cause lot
+   of free pages. Free pages are simply discarded with a warning log if the IDs don't fit in
+   the meta page. Simple solution for this is to do a range-scan and re-create a new index file
+   and delete the old one.
+
+## Benchmarks
+
+Output of very simple benchmarks (found in `tests/` directory):
+
+```plaintext
+    TestBPlusTree: bptree_test.go:16: using file 'kiwi_bptree.idx'...
+    TestBPlusTree: bptree_test.go:38: took 45.007031ms to Put 10000 entries
+    TestBPlusTree: bptree_test.go:44: took 49.01µs to Scan 10000 entries
+    TestBPlusTree: bptree_test.go:50: took 1.874451ms to Get 10000 entries
+```
