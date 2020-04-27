@@ -37,8 +37,7 @@ func Test_node_Search(t *testing.T) {
 
 func Test_node_Leaf_Binary(t *testing.T) {
 	original := node{
-		id:     10,
-		pageSz: 4096,
+		id: 10,
 		entries: []entry{
 			{key: []byte("hello"), val: 10},
 			{key: []byte("world"), val: 100},
@@ -52,7 +51,6 @@ func Test_node_Leaf_Binary(t *testing.T) {
 		t.Fatalf("failed to marshal: %#v", err)
 	}
 	original.id = 0
-	original.pageSz = 0
 
 	got := node{}
 	if err := got.UnmarshalBinary(d); err != nil {
@@ -66,8 +64,7 @@ func Test_node_Leaf_Binary(t *testing.T) {
 
 func Test_node_Internal_Binary(t *testing.T) {
 	original := node{
-		id:     10,
-		pageSz: 4096,
+		id: 10,
 		entries: []entry{
 			{key: []byte("hello")},
 			{key: []byte("world")},
@@ -80,7 +77,6 @@ func Test_node_Internal_Binary(t *testing.T) {
 		t.Fatalf("failed to marshal: %#v", err)
 	}
 	original.id = 0
-	original.pageSz = 0
 
 	got := node{}
 	if err := got.UnmarshalBinary(d); err != nil {

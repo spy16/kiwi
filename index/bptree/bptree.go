@@ -438,27 +438,21 @@ func (tree *BPlusTree) allocOne() (*node, error) {
 func (tree *BPlusTree) alloc(n int) ([]*node, error) {
 	// check if there are enough free pages from the freelist
 	// and try to allocate sequential set of pages.
-	allocated, free := allocateFree(tree.meta.freeList, n)
-	tree.meta.freeList = free
+	pid, rem := allocSeq(tree.meta.freeList, n)
+	tree.meta.freeList = rem
 
 	// free list could be having less pages than we actually need.
 	// we need to allocate if that is the case.
-	if len(allocated) < n {
-		rem := n - len(allocated)
-		pid, err := tree.pager.Alloc(rem)
+	if pid < 0 {
+		var err error
+		pid, err = tree.pager.Alloc(n)
 		if err != nil {
 			return nil, err
-		}
-
-		for i := 0; i < rem; i++ {
-			allocated = append(allocated, pid)
-			pid++
 		}
 	}
 
 	nodes := make([]*node, n)
 	for i := 0; i < n; i++ {
-		pid := allocated[i]
 		n := newNode(pid, int(tree.meta.pageSz))
 		tree.nodes[pid] = n
 		nodes[i] = n
@@ -589,27 +583,29 @@ func (tree *BPlusTree) computeDegree(pageSz int) error {
 	return nil
 }
 
-func allocateFree(arr []int, n int) (alloc, free []int) {
-	if len(arr) <= n {
-		return arr, nil
+// allocSeq finds a subset of size 'n' in 'free' that is sequential.
+// Returns the first int in the sequence the set after removing the
+// subset.
+func allocSeq(free []int, n int) (id int, remaining []int) {
+	if len(free) <= n {
+		return -1, free
 	} else if n == 1 {
-		return []int{arr[0]}, arr[1:]
+		return free[0], free[1:]
 	}
 
 	i, j := 0, 0
-	for ; i < len(arr); i++ {
+	for ; i < len(free); i++ {
 		j = i + (n - 1)
-		if j < len(arr) && arr[j] == arr[i]+(n-1) {
+		if j < len(free) && free[j] == free[i]+(n-1) {
 			break
 		}
 	}
 
-	if i >= len(arr) || j >= len(arr) {
-		i, j = 0, n-1
+	if i >= len(free) || j >= len(free) {
+		return -1, free
 	}
 
-	res := make([]int, n)
-	copy(res, arr[i:j+1])
-	arr = append(arr[:i], arr[j+1:]...)
-	return res, arr
+	id = free[i]
+	free = append(free[:i], free[j+1:]...)
+	return id, free
 }

@@ -17,17 +17,15 @@ const (
 // newNode initializes an in-memory leaf node and returns.
 func newNode(id int, pageSz int) *node {
 	return &node{
-		id:     id,
-		dirty:  true,
-		pageSz: pageSz,
+		id:    id,
+		dirty: true,
 	}
 }
 
 // node represents an internal or leaf node in the B+ tree.
 type node struct {
 	// configs for read/write
-	dirty  bool
-	pageSz int
+	dirty bool
 
 	// node data
 	id       int
@@ -105,8 +103,27 @@ func (n node) String() string {
 	return s
 }
 
+func (n node) size() int {
+	if n.isLeaf() {
+		sz := leafNodeHeaderSz
+		for i := 0; i < len(n.entries); i++ {
+			// 2 for the key size, 8 for the uint64 value
+			sz += 2 + 8 + len(n.entries[i].key)
+		}
+		return sz
+
+	}
+
+	sz := internalNodeHeaderSz + 4 // +4 for the extra child pointer
+	for i := 0; i < len(n.entries); i++ {
+		// 4 for the child pointer, 2 for the key size
+		sz += 4 + 2 + len(n.entries[i].key)
+	}
+	return sz
+}
+
 func (n node) MarshalBinary() ([]byte, error) {
-	buf := make([]byte, n.pageSz)
+	buf := make([]byte, n.size())
 	offset := 0
 
 	if n.isLeaf() {
@@ -164,9 +181,7 @@ func (n node) MarshalBinary() ([]byte, error) {
 }
 
 func (n *node) UnmarshalBinary(d []byte) error {
-	if len(d) < n.pageSz {
-		return errors.New("in-sufficient data")
-	} else if n == nil {
+	if n == nil {
 		return errors.New("cannot unmarshal into nil node")
 	}
 
