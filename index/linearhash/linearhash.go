@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/spy16/kiwi/index"
-	"github.com/spy16/kiwi/io"
+	"github.com/spy16/kiwi/pager"
 )
 
 // Open opens the file as linear-hash indexing file and returns the indexer
@@ -17,7 +17,7 @@ func Open(indexFile string, opts *Options) (*LinearHash, error) {
 		opts = &defaultOptions
 	}
 
-	p, err := io.Open(indexFile, os.Getpagesize(), opts.ReadOnly, opts.FileMode)
+	p, err := pager.Open(indexFile, os.Getpagesize(), opts.ReadOnly, opts.FileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +43,7 @@ func Open(indexFile string, opts *Options) (*LinearHash, error) {
 // algorithm.
 type LinearHash struct {
 	mu        *sync.RWMutex
-	pager     *io.Pager
+	pager     *pager.Pager
 	readOnly  bool
 	pageSize  int
 	slotCount int

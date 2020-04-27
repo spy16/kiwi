@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/spy16/kiwi/index"
-	"github.com/spy16/kiwi/io"
+	"github.com/spy16/kiwi/pager"
 )
 
 // bin is the byte order used for all marshals/unmarshals.
@@ -27,7 +27,7 @@ func Open(fileName string, opts *Options) (*BPlusTree, error) {
 		opts = &defaultOptions
 	}
 
-	p, err := io.Open(fileName, opts.PageSize, opts.ReadOnly, opts.FileMode)
+	p, err := pager.Open(fileName, opts.PageSize, opts.ReadOnly, opts.FileMode)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +66,7 @@ type BPlusTree struct {
 
 	// tree state
 	mu    *sync.RWMutex
-	pager *io.Pager
+	pager *pager.Pager
 	nodes map[int]*node // node cache to avoid IO
 	meta  metadata      // metadata about tree structure
 	root  *node         // current root node

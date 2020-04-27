@@ -1,4 +1,4 @@
-package io
+package pager
 
 import (
 	"errors"
