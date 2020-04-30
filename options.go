@@ -7,7 +7,8 @@ const (
 	BPlusTree IndexType = 0
 )
 
-var defaultOptions = Options{
+// DefaultOptions provides some sane defaults for initializing Kiwi DB.
+var DefaultOptions = Options{
 	IndexType: BPlusTree,
 	ReadOnly:  false,
 	FileMode:  0664,
