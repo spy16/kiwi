@@ -2,7 +2,7 @@ package kiwi
 
 import "os"
 
-// Indexing shemes supported.
+// Indexing schemes supported.
 const (
 	BPlusTree IndexType = 0
 )

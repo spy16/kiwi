@@ -9,7 +9,7 @@ import (
 )
 
 // Open opens the named file as Kiwi database and returns a DB instance for
-// accessing it. If the file doesn't exist, it will be created and initialzed
+// accessing it. If the file doesn't exist, it will be created and initialized
 // if not in read-only mode.
 func Open(filePath string, opts *Options) (*DB, error) {
 	if opts == nil {

@@ -77,6 +77,15 @@ func (n *node) insertAt(idx int, e entry) {
 	n.entries[idx] = e
 }
 
+// removeAt removes the entry at given index and returns the value
+// that existed.
+func (n *node) removeAt(idx int) entry {
+	n.dirty = true
+	e := n.entries[idx]
+	n.entries = append(n.entries[:idx], n.entries[idx:]...)
+	return e
+}
+
 // update updates the value of the entry with given index.
 func (n *node) update(entryIdx int, val uint64) {
 	if val != n.entries[entryIdx].val {

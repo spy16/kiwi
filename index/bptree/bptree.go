@@ -132,7 +132,15 @@ func (tree *BPlusTree) Del(key []byte) (uint64, error) {
 	tree.mu.Lock()
 	defer tree.mu.Unlock()
 
-	return 0, errors.New("not implemented")
+	target, idx, found, err := tree.searchRec(tree.root, key)
+	if err != nil {
+		return 0, err
+	} else if !found {
+		return 0, index.ErrKeyNotFound
+	}
+
+	e := target.removeAt(idx)
+	return e.val, nil
 }
 
 // Scan performs an index scan starting at the given key. Each entry will be
