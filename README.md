@@ -13,3 +13,4 @@ Kiwi is a multi-backend key-value store written in Go.
 3. https://cstack.github.io/db_tutorial/
 4. https://github.com/boltdb/bolt
 5. https://artem.krylysov.com/blog/2018/03/24/pogreb-key-value-store/
+6. https://hackthology.com/an-in-memory-go-implementation-of-linear-hashing.html
